@@ -81,7 +81,7 @@ file. See `quickstart.md` §1 before reporting the feature as working.
 - [x] T015 [US2] Add `NarrRailUEHost/Source/NarrRailHost/NarrRailHostSaveGame.h` holding one serialized snapshot as a `USaveGame`. **Done 2026-09-16.** Holds the session snapshot *and* the global state snapshot plus a display timestamp. One deviation from the reference: the two snapshot fields are `VisibleAnywhere` rather than `BlueprintReadWrite`, so a Blueprint cannot hand-assemble a slot payload — same FR-007 reasoning as the runtime struct.
 - [x] T016 [US2] Add slot save and load entry points to `NarrRailUEHost/Source/NarrRailHost/NarrRailPlayerController.h` and `NarrRailUEHost/Source/NarrRailHost/NarrRailPlayerController.cpp`, covering the missing-slot failure path so the running session is left untouched (FR-005, FR-008). **Done 2026-09-16.** `SaveNarrRailState` / `LoadNarrRailState`. A missing or foreign slot returns false before anything is touched; a failed restore logs the runtime's own message rather than swallowing it. **Known residual, documented in-source and below:** the host restores global state and session state as two steps, so if the global restore succeeds and the session restore is then rejected, global state stays at the saved values. Making that atomic needs a validate-only entry point on the runtime; see the note under Dependencies.
 - [x] T017 [US2] Verify the Blueprint-exposed surface for this feature matches FR-007 exactly: capture and restore on the session, save and load on the host. Remove any additional exposure found. **Done 2026-09-16 — and it found something.** The review's first pass claimed the surface was already minimal; it was not. `GetGlobalStateSnapshot` and `RestoreGlobalStateSnapshot` had been carried over as `UFUNCTION`s, and FR-007 enumerates only session capture/restore plus host save/load. Both were demoted to plain public C++ methods — still callable by the host and the tests, no longer visible to Blueprint. Public is not the same as Blueprint-visible in UE, and the reference implementation conflated the two. Final surface: `GetSessionSnapshot` (`BlueprintPure`), `RestoreSessionSnapshot` (`BlueprintCallable`), `SaveNarrRailState` / `LoadNarrRailState` (`BlueprintCallable`), plus `SavedAtUtc` as a documented read-only display exception (CHK043). No snapshot field is Blueprint-readable or writable at any layer.
-- [ ] T018 [P] [US2] **⚠️ Requires the editor, and the reference branch is the ONLY copy of these five files.** Migrate the save slot assets into `NarrRailUEHost/Content/NarrRailStage/UI/`: `Enum_SaveMode.uasset`, `WBP_Start.uasset`, `WBP_TextLine.uasset`, `SaveGame/WBP_SaveGame.uasset`, `SaveGame/WBP_SaveSlot.uasset`. Author or reconcile these in the editor; do not copy binary files blindly.
+- [ ] T018 [P] [US2] **⚠️ Requires the editor, and the reference branch is the ONLY copy of these five files.** Migrate the save slot assets into `NarrRailUEHost/Content/NarrRailStage/UI/`: `Enum_SaveMode.uasset` (2,203 B), `WBP_Start.uasset` (337,906 B), `WBP_TextLine.uasset` (56,251 B), `SaveGame/WBP_SaveGame.uasset` (104,456 B), `SaveGame/WBP_SaveSlot.uasset` (130,664 B) — ~631 KB with no copy in this repository. Author or reconcile these in the editor; do not copy binary files blindly. **This task and T019 are the branch-deletion gate**; see "Known residual" below.
 - [ ] T019 [US2] **⚠️ Requires the editor.** Author or reconcile `NarrRailUEHost/Content/NarrRailStage/BP_StoryController.uasset` and `BP_StoryGameMode.uasset` so the save slot surface is reachable from the running stage. Record each reconciliation decision. Depends on T018: both need the same editor session.
 
 ## Phase 5: User Story 3 - Reject incompatible saves (Priority: P2)
@@ -131,6 +131,38 @@ entry point so the host can two-phase both snapshots. That is an API change, and
 yet and no engine available to test against, it would be compensation logic that nothing exercises.
 **Trigger to revisit**: the first real need to recover from a partial host load. Recorded in-source at the
 ordering comment in `NarrRailPlayerController.cpp` so it is not rediscovered from scratch.
+
+## Known residual: `feature/narrrail-save-snapshots` is not yet deletable
+
+The goal of this port was to reach a state where the reference branch could be deleted. **It has not been
+reached, and deletion right now would destroy work.** The gate is T018 plus T019, and the reason is asset
+inventory, not code.
+
+The audit below compares full recursive `ls-tree` blob hashes of
+`Courtshipfy/NarrRail@feature/narrrail-save-snapshots` (`2e3903f`) against this repository's `main`. It is
+reproducible; `quickstart.md` §7 records the method and two traps in it.
+
+| Category | Count | Effect on deletion |
+|----------|-------|--------------------|
+| UI asset present only on the branch | 5 (~631 KB) | **Blocking.** No copy exists here. T018. |
+| Asset present in both, content differs | 6 | **Blocking.** The branch side holds the slot wiring. T019, T026. |
+| Test story asset under an old name | 2 | Not blocking. Rename-twins of copies here (identical byte size). |
+| Dead host scaffolding (`NarrRailHostTest.*`) | 2 | Not blocking. Empty class, deleted here in T029. |
+| Runtime/host source | 9 files differing, 0 missing | Not blocking. Ported deliberately, with three recorded deviations. |
+
+Two facts worth stating plainly, because both were nearly missed:
+
+1. The five UI assets — `Enum_SaveMode.uasset` (2,203 B), `WBP_Start.uasset` (337,906 B),
+   `WBP_TextLine.uasset` (56,251 B), `SaveGame/WBP_SaveGame.uasset` (104,456 B),
+   `SaveGame/WBP_SaveSlot.uasset` (130,664 B) — are the save slot surface. Without T018 the ported C++ has
+   no way to be exercised from the running stage, so T028 could not be performed either.
+2. **The two "extra" story assets and the `NarrRailHostTest` pair are not gaps.** They surface in a naive
+   path-set difference and were cleared only after checking blob hashes and byte sizes. Do not re-open them
+   as risks without re-running that check.
+
+Deletion is therefore gated on **T018 and T019 landing in this repository**, not on anything in the source
+repository. Once the five assets exist here in reconciled form, the branch's unique payload is empty except
+for reference history.
 
 ## MVP Scope
 
