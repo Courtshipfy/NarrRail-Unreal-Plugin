@@ -172,17 +172,27 @@ the save slot UI, and **the reference branch is their only copy**:
 | `NarrRailUEHost/Content/NarrRailStage/UI/SaveGame/WBP_SaveGame.uasset` | 104,456 B |
 | `NarrRailUEHost/Content/NarrRailStage/UI/SaveGame/WBP_SaveSlot.uasset` | 130,664 B |
 
-Consequences, and they are the reason this is called out separately:
+Consequences:
 
-1. **`Courtshipfy/NarrRail@feature/narrrail-save-snapshots` MUST NOT be deleted until T018 and T019 are
-   done.** Deleting it destroys the only copy of ~631 KB of UI work. This is not a stylistic
-   preference; it is data loss.
-2. These are binary assets. They must be **authored or reconciled in the editor**, never copied across
+1. These are binary assets. They must be **authored or reconciled in the editor**, never copied across
    repositories and never text-patched — the same rule as the six assets above, and for the same
    reason: a difference between two same-named `.uasset` files cannot be attributed from a diff.
+2. **The branch was deleted on 2026-09-16, after archiving.** Two independent copies were made first, and
+   neither of them is this repository's working tree:
 
-Reference commit for recovery: `2e3903f8a42711f54e9aa279135239387beab799`. Recorded here as well as in
-`tasks.md`, so that recovering these assets does not depend on the branch still existing under that name.
+   - Tag `archive/narrrail-save-snapshots` in `Courtshipfy/NarrRail` (annotated tag `84b90f3` →
+     `2e3903f8a42711f54e9aa279135239387beab799`). Complete — the whole tree, reference C++ included.
+   - `Docs/05_reference_archive/reference-branch-payload.zip` in this repository: 27 files, 1.7 MB, with a
+     per-file SHA-256 manifest in `MANIFEST.md`. Contents: the 5 UI assets, the 6 conflicting assets, the
+     4 unmigrated Unreal remote-tooling scripts, the reference C++, and 2 renamed story assets.
+
+   Prefer the tag. Verify against `MANIFEST.md`'s SHA-256 rather than its git blob shas — a blob sha is
+   only reproducible while the source repository still holds the object.
+
+**Archiving removed the data-loss reason to keep the branch. It did not close the work.** T018, T019, T026,
+T027 and T028 are all still open, and User Story 2 acceptance scenario 4 — "Given the save slot UI is open,
+When the player selects a saved slot, Then loading resumes the story in that slot" — is **not satisfied** in
+this repository. See `tasks.md`, "Known residual: the branch was deleted with work still open".
 
 ### Audited and cleared — looks branch-only, is not
 
@@ -190,25 +200,52 @@ The check above ("present on the branch, absent here") was originally done as a 
 over-reports: a file can be absent under one name and present under another, or absent and worthless. Each
 remaining hit was then audited individually. These are **not** deletion risks:
 
-- `.../NarrRailEditor_TestRepo/Stories/伤物语.uasset` (15,823 B) and `.../抚物语.uasset` (27,970 B). This
-  repository holds `傷物語.uasset` (15,823 B) and `撫物語.uasset` (27,970 B) — **identical byte sizes**,
-  different blob hashes. A UE asset embeds its own asset name, so the rename alone changes the hash. These
-  are rename-twins of this repository's copies, already migrated; the third one, `蜗物语.uasset`
-  (18,727 B), is byte-identical across both and needed no audit. Nothing is lost by dropping the
-  branch's two.
+- `.../NarrRailEditor_TestRepo/Stories/伤物语.uasset` (15,823 B) and `.../抚物语.uasset` (27,970 B). The
+  **branch** renamed these from `傷物語.uasset` / `撫物語.uasset` (git reports 95% and 96% similarity) and
+  deleted `君の知らない物語.uasset`. This repository kept the original names and still has them, at
+  identical byte sizes but different blob hashes — a UE asset embeds its own asset name, so the rename
+  alone changes the hash. Content is preserved under the original names. Both branch-side copies are in
+  the archive, and the deletion is listed in its manifest.
+  **Correction:** an earlier version of this section described these as having been renamed *during the
+  migration*. That had the direction backwards — `git diff 70fcdb0 feature/narrrail-save-snapshots` shows
+  the branch as the side that renamed them. The conclusion (not a deletion risk) is unchanged, but the
+  explanation was wrong and is corrected here rather than quietly dropped.
 - `NarrRailUEHost/Source/NarrRailHost/NarrRailHostTest.h` (228 B) and `.cpp` (196 B). An empty class with a
   default constructor and destructor, added by `5c030cc 示例项目初步重构`, never modified since, and
   referenced by no other file in either repository. Dead scaffolding; its absence here is correct, not a gap.
 
-Method, so the audit can be re-run rather than re-argued: compare full recursive `ls-tree` blob hashes of
-`feature/narrrail-save-snapshots` against this repository's `main`, not path sets and not `git diff` against
-the source repository's `main` — that `main` no longer carries any Unreal content, so everything under
-`NarrRail/` and `NarrRailUEHost/` reads as "added" there and the diff is uninformative. Note also that
-non-ASCII paths arrive octal-escaped from Git; a trailing quote left on the decoded path makes
-`cat-file -s` fail silently and report every such file as 0 B.
+### Method — and the mistake that had to be fixed twice
 
-On that hash comparison this repository carries **no** asset that the branch lacks, so the inventory gap is
-one-directional: the five files in the table above, plus the six conflicts listed before it.
+For deletion safety the question is **"what does the branch hold that survives nowhere else?"**, and three
+traps each produced a wrong answer before the fourth attempt held:
+
+1. **Path sets are not enough** — a file absent under one name may exist under another.
+2. **Do not diff against the source repository's `main`.** It no longer carries any Unreal content, so
+   everything under `NarrRail/` and `NarrRailUEHost/` reads as "added" and the diff says nothing.
+3. **Do not stop at a two-tree hash comparison.** Comparing `feature/narrrail-save-snapshots` against this
+   repository's `main` still over-reported by a factor of four: **95 files / 4 MB**, of which about 85 were
+   pure noise. A branch forked months ago differs from `main` in *both* directions, and a two-tree
+   difference cannot say which direction any given file runs in.
+
+The correct scope is **paths the branch changed since its merge base**, which is `70fcdb0` (2026-06-16);
+verify it with `git merge-base main feature/narrrail-save-snapshots` rather than assuming it. That reduces
+the payload to 27 files / 1.7 MB.
+
+Two examples of the noise that scoping removes, both of which look alarming as raw differences:
+
+- **`NarrRailEditor/` appears heavily changed, but the branch never touched it.**
+  `git diff --name-only 70fcdb0 feature/narrrail-save-snapshots -- NarrRailEditor/` returns nothing. Every
+  editor difference is `main`'s later `refactor/canvas-graph-renderer` work (PR #31/#32) — including the
+  `*.svelte` node components that `main` replaced with Vue Canvas rendering, and which therefore exist only
+  on the branch merely because the branch is older.
+- **`Docs/06_planning/TASK_PLAN.md`** is on the branch and absent from `main`, but `main` removed it
+  deliberately in `5fbdd4c` ("Remove Unreal consumer code from main repo").
+
+Tooling, if this audit is ever re-run: `archive_branch_payload.py` in the `spec-kit-cross-repo-port` skill
+takes `--scope-since <merge-base>` and produces the zip plus the SHA-256 manifest. Also note two Git traps —
+`core.quotePath` is on by default, so non-ASCII paths arrive octal-escaped; and a trailing quote left on a
+decoded path makes `cat-file -s` fail silently and report every such file as 0 B. Use `git ls-tree -r -z
+--long` and both disappear.
 
 ## Reporting
 
