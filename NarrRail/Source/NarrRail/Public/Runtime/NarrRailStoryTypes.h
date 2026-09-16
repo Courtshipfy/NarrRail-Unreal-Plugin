@@ -252,23 +252,28 @@ struct NARRRAIL_API FNarrRailNodeEdge
 };
 
 // 最后一次选择的信息
+//
+// 这个结构体会被嵌套进会话快照，因此每个成员都带 SaveGame 标记。理由见
+// NarrRailStorySession.h 里 FNarrRailStorySessionSnapshot 上的说明：引擎文档与社区实践对
+// 「SaveGame 标记在 SaveGameToSlot 路径上到底是不是必需」说法不一致，加上它没有代价，而漏掉
+// 它的后果是存档静默丢失字段。
 USTRUCT(BlueprintType)
 struct NARRRAIL_API FNarrRailLastChoiceInfo
 {
     GENERATED_BODY()
 
-    UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "NarrRail")
+    UPROPERTY(EditAnywhere, BlueprintReadOnly, SaveGame, Category = "NarrRail")
     FName ChoiceNodeId = NAME_None;
 
-    UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "NarrRail")
+    UPROPERTY(EditAnywhere, BlueprintReadOnly, SaveGame, Category = "NarrRail")
     int32 ChoiceIndex = -1;
 
-    UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "NarrRail")
+    UPROPERTY(EditAnywhere, BlueprintReadOnly, SaveGame, Category = "NarrRail")
     FName TargetNodeId = NAME_None;
 
-    UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "NarrRail")
+    UPROPERTY(EditAnywhere, BlueprintReadOnly, SaveGame, Category = "NarrRail")
     FString ChoiceTextKey;
 
-    UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "NarrRail")
+    UPROPERTY(EditAnywhere, BlueprintReadOnly, SaveGame, Category = "NarrRail")
     bool bValid = false;
 };
