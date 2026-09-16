@@ -72,6 +72,26 @@ Capture, restore, rejection, gate, and no-mutation-on-save cases all pass. If th
 zero tests matching `NarrRail.Save`, the test file is not being compiled and the build configuration
 must be fixed before any manual verification is meaningful.
 
+The suite consists of eleven tests, all under `NarrRail.Save.`, so the single filter above selects
+them all:
+
+| Test | Covers |
+|------|--------|
+| `SessionSnapshot.PlainNodeRoundTrip` | T010, FR-001/FR-002 |
+| `SessionSnapshot.MultiDialogueLineRoundTrip` | T011 |
+| `SessionSnapshot.ConsumedChoiceRoundTrip` | T012 |
+| `SessionSnapshot.CaptureDoesNotMutate` | T013, FR-006/SC-002 |
+| `SessionSnapshot.ResumeAdvancesIdentically` | T014 |
+| `SessionSnapshot.RejectUnsupportedVersion` | T020-T022, FR-003/FR-010 |
+| `SessionSnapshot.RejectMissingRequiredField` | T022 |
+| `SessionSnapshot.RejectUnresolvableNode` | T023 |
+| `SessionSnapshot.ConsistencyGate` | T032, FR-009 |
+| `GlobalStateSnapshot.RestoresPresetSpeakersAndValues` | T009 |
+| `GlobalStateSnapshot.RejectUnsupportedVersion` | T009, FR-010 |
+
+To run one case by name, pass its full dotted name, e.g.
+`-ExecCmds="Automation RunTest NarrRail.Save.SessionSnapshot.ConsistencyGate;Quit"`.
+
 ### ⚠️ This cannot be run in the environment used for the port
 
 The port was performed on a machine with **no Unreal Engine installed** — only the Epic Games
