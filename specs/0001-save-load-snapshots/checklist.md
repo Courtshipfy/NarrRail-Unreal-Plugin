@@ -32,6 +32,8 @@ and the constitution gates before the feature is considered complete.
 - [ ] CHK036 Is every node id referenced by a consumed choice record validated to still resolve on restore?
 - [ ] CHK037 Is every consumed option index validated against that node's option count on restore?
 - [ ] CHK038 Is the restore path structured as a per-version dispatch with a single supported branch, so a future migration is a new branch rather than a restructure?
+- [ ] CHK039 Is every node id on the exhaustive-choice return stack validated to still resolve on restore?
+- [ ] CHK040 Is `NodeHistory` deliberately left ungated, with a test asserting a snapshot carrying a deleted history node id is accepted, so the gate cannot drift into over-rejecting ordinary authoring edits?
 
 ## C++ and Blueprint boundary
 
