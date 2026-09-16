@@ -16,6 +16,29 @@ Read it as a source of proven behaviour, not as a patch to apply wholesale.
 **Path conventions**: paths are relative to the repository root. Two modules are involved:
 `NarrRail/Source/NarrRail/` (runtime) and `NarrRailUEHost/Source/NarrRailHost/` (host).
 
+## Status
+
+**27 of 32 tasks complete.** Everything that does not require an Unreal Engine is done: the runtime
+capability, the host surface, the test suite, and the documentation.
+
+**Five tasks remain, and every one of them needs a machine with UE 5.7.** None could be performed where
+the port was done — there is no engine installed there (see `quickstart.md` §1). They are not blocked by
+unfinished work; they are blocked by the absence of a toolchain:
+
+| Task | What it needs |
+|------|---------------|
+| T018 | Editor. Save slot UI assets. Binary — must not be copied or text-patched. |
+| T019 | Editor. Wire the save slot surface into the stage Blueprints. Depends on T018. |
+| T026 | Editor. Reconcile four conflicting dialogue assets. |
+| T027 | Engine. Run the automation suite and the host build. |
+| T028 | Editor. Run quickstart steps 2-6 in a live session. |
+
+Also note the scope of what was done: T029 (the constitution review) **is** complete, but it is a source
+review and could not check a build or a test run.
+
+**Nothing in this feature has been compiled.** That single sentence is the most important thing in this
+file. See `quickstart.md` §1 before reporting the feature as working.
+
 ## Phase 1: Setup
 
 - [x] T001 Read the reference implementation at the two commits above and enumerate the full set of stored snapshot fields, recording each field's name, type, and purpose. **Done 2026-09-16.** Enumerated all fourteen session-snapshot fields from `NarrRailStorySession.h`, plus the three-field `FNarrRailGlobalStateSnapshot`, the five sub-fields of `FNarrRailLastChoiceInfo`, the two fields of `FNarrRailChoiceSelectionSnapshot`, and the three derived members that are rebuilt rather than stored. `data-model.md` updated: the field table is now complete, the fabricated "global variable state on the session context" row was corrected to the separate global-state entity, all `to confirm` markers are resolved, and FR-009's gate scope gained a return-stack check with a stated dereferenced-vs-recorded rule. Two findings recorded rather than silently fixed: `NodeHistory` and `ExhaustivePendingChoiceReturnStack` carried node ids that no gate validated.
@@ -57,7 +80,7 @@ Read it as a source of proven behaviour, not as a patch to apply wholesale.
 
 - [x] T015 [US2] Add `NarrRailUEHost/Source/NarrRailHost/NarrRailHostSaveGame.h` holding one serialized snapshot as a `USaveGame`. **Done 2026-09-16.** Holds the session snapshot *and* the global state snapshot plus a display timestamp. One deviation from the reference: the two snapshot fields are `VisibleAnywhere` rather than `BlueprintReadWrite`, so a Blueprint cannot hand-assemble a slot payload — same FR-007 reasoning as the runtime struct.
 - [x] T016 [US2] Add slot save and load entry points to `NarrRailUEHost/Source/NarrRailHost/NarrRailPlayerController.h` and `NarrRailUEHost/Source/NarrRailHost/NarrRailPlayerController.cpp`, covering the missing-slot failure path so the running session is left untouched (FR-005, FR-008). **Done 2026-09-16.** `SaveNarrRailState` / `LoadNarrRailState`. A missing or foreign slot returns false before anything is touched; a failed restore logs the runtime's own message rather than swallowing it. **Known residual, documented in-source and below:** the host restores global state and session state as two steps, so if the global restore succeeds and the session restore is then rejected, global state stays at the saved values. Making that atomic needs a validate-only entry point on the runtime; see the note under Dependencies.
-- [x] T017 [US2] Verify the Blueprint-exposed surface for this feature matches FR-007 exactly: capture and restore on the session, save and load on the host. Remove any additional exposure found. **Done 2026-09-16 as a review, not a change pass.** The surface is: `GetSessionSnapshot` (`BlueprintPure`), `RestoreSessionSnapshot` (`BlueprintCallable`) on the session; `SaveNarrRailState` / `LoadNarrRailState` (`BlueprintCallable`) on the host; `SavedAtUtc` (`BlueprintReadOnly`) on the save game. No snapshot field is Blueprint-readable or writable at any layer. Everything the reference exposed beyond that was removed as part of T005 and T015 rather than left for this task.
+- [x] T017 [US2] Verify the Blueprint-exposed surface for this feature matches FR-007 exactly: capture and restore on the session, save and load on the host. Remove any additional exposure found. **Done 2026-09-16 — and it found something.** The review's first pass claimed the surface was already minimal; it was not. `GetGlobalStateSnapshot` and `RestoreGlobalStateSnapshot` had been carried over as `UFUNCTION`s, and FR-007 enumerates only session capture/restore plus host save/load. Both were demoted to plain public C++ methods — still callable by the host and the tests, no longer visible to Blueprint. Public is not the same as Blueprint-visible in UE, and the reference implementation conflated the two. Final surface: `GetSessionSnapshot` (`BlueprintPure`), `RestoreSessionSnapshot` (`BlueprintCallable`), `SaveNarrRailState` / `LoadNarrRailState` (`BlueprintCallable`), plus `SavedAtUtc` as a documented read-only display exception (CHK043). No snapshot field is Blueprint-readable or writable at any layer.
 - [ ] T018 [P] [US2] **⚠️ Requires the editor.** Migrate the save slot assets into `NarrRailUEHost/Content/NarrRailStage/UI/`: `Enum_SaveMode.uasset`, `WBP_Start.uasset`, `WBP_TextLine.uasset`, `SaveGame/WBP_SaveGame.uasset`, `SaveGame/WBP_SaveSlot.uasset`. Author or reconcile these in the editor; do not copy binary files blindly.
 - [ ] T019 [US2] **⚠️ Requires the editor.** Author or reconcile `NarrRailUEHost/Content/NarrRailStage/BP_StoryController.uasset` and `BP_StoryGameMode.uasset` so the save slot surface is reachable from the running stage. Record each reconciliation decision. Depends on T018: both need the same editor session.
 
@@ -80,7 +103,7 @@ Read it as a source of proven behaviour, not as a patch to apply wholesale.
 - [ ] T026 [P] Reconcile the remaining conflicting dialogue assets in the editor and record the decisions: `NarrRail/Content/UI/ADV/WBP_Dialogue_ADV.uasset`, `NarrRail/Content/UI/NVL/WBP_Dialogue_NVL.uasset`, `NarrRail/Content/UI/NVL/WBP_ButtonLine.uasset`, `NarrRail/Content/UI/NVL/WBP_TextLine.uasset`. **⚠️ Requires the editor** — no engine on the port machine, and these are binary assets that must not be copied or text-patched.
 - [ ] T027 Run the full automation suite and the host build; confirm both are clean. **⚠️ Not executable on the port machine** — no Unreal Engine is installed there (see `quickstart.md` §1). This task and T028 are the handoff: they must be run by the user on a machine with UE 5.7, and the result reported honestly rather than assumed.
 - [ ] T028 Run the unmatched quickstart steps in a real Unreal session and record which steps were performed, which were not, and each asset reconciliation decision, per the Reporting section of `quickstart.md`. **⚠️ Same blocker as T027.**
-- [ ] T029 Review the diff against `spec.md` and the constitution, confirming no neutral-format semantics were introduced and that the Blueprint surface is still minimal. Also resolve the dead `NarrRailHostTest.h` / `NarrRailHostTest.cpp` pair carried in from the host project template: an empty class, referenced by nothing, containing no automation test. Either delete it or give it a stated purpose — as it stands the name implies test coverage in the host module that does not exist.
+- [x] T029 Review the diff against `spec.md` and the constitution, confirming no neutral-format semantics were introduced and that the Blueprint surface is still minimal. Also resolve the dead `NarrRailHostTest.h` / `NarrRailHostTest.cpp` pair carried in from the host project template: an empty class, referenced by nothing, containing no automation test. Either delete it or give it a stated purpose — as it stands the name implies test coverage in the host module that does not exist. **Done 2026-09-16.** Verified by enumerating every file the port touched: no importer, factory, schema, or format-contract code appears, so constitution principles I and II hold. The surface review found one real over-exposure (the two global-snapshot `UFUNCTION`s) which was removed — see T017. The dead `NarrRailHostTest` pair was confirmed unreferenced and deleted. Findings recorded as CHK041-CHK045. **What this review could not do: check a build or a test run.** It is a source review, and it is labelled as one.
 
 ## Dependencies
 

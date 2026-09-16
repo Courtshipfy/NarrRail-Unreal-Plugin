@@ -64,9 +64,17 @@ and the constitution gates before the feature is considered complete.
 
 ## Verification honesty
 
-- [ ] CHK032 Does the automated suite include capture, restore, rejection, no-mutation-on-save, and unresolvable-node cases, and did the suite actually run?
-- [ ] CHK033 Were the manual Unreal steps in `quickstart.md` performed, or explicitly reported as not performed?
-- [ ] CHK034 Does the closing report state which verification steps were executed and which were not, without claiming anything unverified?
+- [ ] CHK032 Does the automated suite include capture, restore, rejection, no-mutation-on-save, and unresolvable-node cases, and did the suite actually run? **Partially: the cases all exist (eleven tests, see `quickstart.md` §1), but the suite has NOT been run.** No Unreal Engine on the machine this port was done on. The "did it actually run" half is unanswered and must not be reported as yes.
+- [ ] CHK033 Were the manual Unreal steps in `quickstart.md` performed, or explicitly reported as not performed? **Explicitly reported as not performed.** Steps 1-6 need an engine; none is installed here.
+- [ ] CHK034 Does the closing report state which verification steps were executed and which were not, without claiming anything unverified? Answered by the note at the top of `quickstart.md` §1 and by `tasks.md` T027/T028.
+
+## T029 review: boundary and surface
+
+- [x] CHK041 Did the change touch any format-contract code — `.nrstory` / GlobalConfig / `.nroutline` parsing, importers, factories, or schema handling? **No.** The port touched `NarrRailStorySession`, `NarrRailGlobalStateSubsystem`, `NarrRailStoryTypes`, the new `Private/Tests/` file, the host save game and player controller, docs, and specs. Constitution principles I and II hold: no neutral-format semantics were introduced or reinterpreted.
+- [x] CHK042 Is the Blueprint surface exactly what FR-007 enumerates? **Yes, after a correction.** FR-007 allows session capture/restore and host save/load. The port had additionally exposed `GetGlobalStateSnapshot` / `RestoreGlobalStateSnapshot` as `UFUNCTION`s; T017 requires removing additional exposure, and they were demoted to plain public C++ methods. The host and the tests still call them. Public is not the same as Blueprint-visible in UE, and the reference conflated the two.
+- [x] CHK043 Is anything Blueprint-visible beyond FR-007's four functions? **One field, with a stated reason.** `UNarrRailHostSaveGame::SavedAtUtc` is `BlueprintReadOnly`. FR-007 speaks of the surface in terms of functions; a display timestamp is part of the save-slot UI and cannot be shown without it. Read-only and written only by C++, so it grants no ability to construct or alter a snapshot. Recorded as a deliberate exception rather than left as a silent extra.
+- [x] CHK044 Is any dead test scaffolding left behind? **Removed.** `NarrRailHostTest.h` / `.cpp` was an empty class carried in from the host project template, referenced by nothing, containing no automation test. Its name implied host test coverage that did not exist, which is worse than no file at all. Deleted.
+- [x] CHK045 Is the host's non-atomicity across the two snapshots recorded rather than hidden? **Yes**, in `tasks.md` under "Known residual", and at the load-ordering comment in `NarrRailPlayerController.cpp`, with a stated trigger for revisiting.
 
 ## Notes
 
