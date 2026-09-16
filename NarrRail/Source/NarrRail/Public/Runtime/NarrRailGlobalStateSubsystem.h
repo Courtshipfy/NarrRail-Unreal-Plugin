@@ -55,11 +55,16 @@ public:
 	FString ResolveSpeakerDisplayName(FName SpeakerId) const;
 
 	// === 全局状态快照 ===
+	//
+	// 这两个函数刻意没有 UFUNCTION。FR-007 把本特性的蓝图暴露面限定为「会话上的采集与恢复、
+	// 宿主上的存档与读档」，全局快照不在其中——它是给宿主 C++ 与自动化测试用的构建块，蓝图侧
+	// 需要存档时走 ANarrRailPlayerController 的存/读接口，那已经覆盖了同一个用法。
+	// 公开（public）是为了让宿主能调用，不是为了暴露给蓝图；两者在 UE 里是两件事。
+	// 参考实现给它们加了 UFUNCTION，那比 FR-007 允许的宽，T017 复查时移除了。
 
 	/**
 	 * 采集全局变量与已应用的全局配置。不改变任何状态。
 	 */
-	UFUNCTION(BlueprintPure, Category = "NarrRail|Save")
 	FNarrRailGlobalStateSnapshot GetGlobalStateSnapshot() const;
 
 	/**
@@ -72,7 +77,6 @@ public:
 	 * @param OutErrorMessage 失败时的可读原因。
 	 * @return 是否恢复成功。失败时已应用状态不会被部分覆盖（见 .cpp 的说明）。
 	 */
-	UFUNCTION(BlueprintCallable, Category = "NarrRail|Save")
 	bool RestoreGlobalStateSnapshot(const FNarrRailGlobalStateSnapshot& Snapshot, FString& OutErrorMessage);
 
 private:
