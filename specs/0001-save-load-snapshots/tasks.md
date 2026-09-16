@@ -19,7 +19,7 @@ Read it as a source of proven behaviour, not as a patch to apply wholesale.
 ## Phase 1: Setup
 
 - [ ] T001 Read the reference implementation at the two commits above and enumerate the full set of stored snapshot fields, recording each field's name, type, and purpose. Reconcile the result against the field table in `data-model.md` and update that table before writing any code.
-- [ ] T002 Decide FR-009 and FR-010, the story-asset mismatch policy and the older-version policy. Record both decisions in `data-model.md`. If either decision changes required behaviour, update `spec.md` before implementation rather than encoding the decision in code.
+- [x] T002 Decide FR-009 and FR-010. **Decided 2026-09-16**: FR-009 = consistency gate over content-bound state; FR-010 = strict rejection with a per-version dispatch seam. Both recorded in `data-model.md`, with `spec.md` FR-009, FR-010, SC-006, and SC-007 updated to match.
 - [ ] T003 Confirm the automation test entry point: how `NarrRail/Source/NarrRail/Private/Tests/` is picked up by the module build, and what command runs the suite. Record the command in `quickstart.md` step 1.
 
 ## Phase 2: Foundational
@@ -29,9 +29,11 @@ Read it as a source of proven behaviour, not as a patch to apply wholesale.
 - [ ] T004 [US-shared] Add the snapshot value types to `NarrRail/Source/NarrRail/Public/Runtime/NarrRailStorySession.h`: the session snapshot struct with its version field, and the choice selection record struct. Expose only what FR-007 allows.
 - [ ] T005 Narrow the exposed surface in `NarrRail/Source/NarrRail/Public/Runtime/NarrRailStorySession.h`: keep the capture and restore entry points and hide the internal snapshot fields from Blueprint where the reference implementation over-exposes them. Justify each field that remains Blueprint-visible in a comment.
 - [ ] T006 Implement capture in `NarrRail/Source/NarrRail/Private/Runtime/NarrRailStorySession.cpp` as a const operation that cannot mutate session state (FR-001, FR-006).
-- [ ] T007 Implement the version gate in `NarrRail/Source/NarrRail/Private/Runtime/NarrRailStorySession.cpp`: reject unsupported, absent, or malformed versions before any state is written (FR-003, FR-008).
+- [ ] T007 Implement the version gate in `NarrRail/Source/NarrRail/Private/Runtime/NarrRailStorySession.cpp` as a per-version dispatch that accepts only the supported version and rejects older, newer, absent, and malformed versions before any state is written (FR-003, FR-008, FR-010). Keep the dispatch shaped as the seam a future migration branch slots into rather than a flat comparison.
 - [ ] T008 Implement restore in `NarrRail/Source/NarrRail/Private/Runtime/NarrRailStorySession.cpp`, including node resolution and the presenter's resulting state (FR-002, FR-004, FR-008, FR-011).
 - [ ] T009 Carry global variable state through capture and restore in `NarrRail/Source/NarrRail/Public/Runtime/NarrRailGlobalStateSubsystem.h` and `NarrRail/Source/NarrRail/Private/Runtime/NarrRailGlobalStateSubsystem.cpp`, so globals set before a save are present after a load.
+- [ ] T030 [US-shared] Implement the FR-009 consistency gate in `NarrRail/Source/NarrRail/Private/Runtime/NarrRailStorySession.cpp`: validate the multi-dialogue line index against the resolved node, validate that every node id referenced by a consumed choice record still resolves, and validate every consumed option index against that node's option count. Reject on any failure, naming the offending field and node.
+- [ ] T031 [US-shared] Order the gates so that version, identity, and consistency checks all run before the first write to session state, so a rejection at any gate leaves the session untouched (FR-008).
 
 ## Phase 3: User Story 1 - Resume a session exactly where it stopped (Priority: P1)
 
@@ -64,9 +66,10 @@ Read it as a source of proven behaviour, not as a patch to apply wholesale.
 **Independent Test**: quickstart step 5, plus the rejection tests below.
 
 - [ ] T020 [US3] Add automation coverage in `NarrRail/Source/NarrRail/Private/Tests/NarrRailSaveSnapshotTests.cpp` for a snapshot declaring a version newer than supported: restore must fail and session state must be unchanged.
-- [ ] T021 [US3] Add automation coverage for a snapshot declaring a version older than supported, matching whichever policy T002 selected.
+- [ ] T021 [US3] Add automation coverage for a snapshot declaring a version older than supported: restore must fail and session state must be unchanged (FR-010).
 - [ ] T022 [US3] Add automation coverage for a malformed snapshot missing a required field: restore must fail and session state must be unchanged.
 - [ ] T023 [US3] Add automation coverage for a snapshot whose referenced node does not resolve in the loaded story asset: restore must fail and identify the offending node.
+- [ ] T032 [US3] Add automation coverage in `NarrRail/Source/NarrRail/Private/Tests/NarrRailSaveSnapshotTests.cpp` for the FR-009 consistency gate: a snapshot whose line index exceeds the resolved node's line count is rejected; a snapshot whose consumed choice record references a deleted node is rejected; a snapshot whose consumed option index exceeds that node's option count is rejected. Each case asserts zero session mutation.
 
 ## Phase 6: Polish & Cross-Cutting Concerns
 
@@ -79,7 +82,9 @@ Read it as a source of proven behaviour, not as a patch to apply wholesale.
 
 ## Dependencies
 
-- T001 and T002 must precede T004: the field set and the version policy define the struct.
+- T001 must precede T004: the field set defines the struct. T002 is complete: the FR-009 and FR-010 decisions are recorded in `data-model.md` and reflected in `spec.md`.
+- T007 and T030 are the two gates that must both land before T008 wires restore to the host.
+- T031 depends on T007 and T030 both existing.
 - T003 must precede T010 so that newly added tests are known to run.
 - T004-T009 (Phase 2) must precede every user-story phase.
 - T008 must precede T015-T016: the host persists a snapshot the runtime can already restore.

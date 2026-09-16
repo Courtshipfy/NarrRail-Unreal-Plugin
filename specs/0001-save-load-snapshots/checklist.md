@@ -23,11 +23,15 @@ and the constitution gates before the feature is considered complete.
 
 - [ ] CHK010 Is the snapshot version an independent counter, unrelated to the story `schemaVersion`?
 - [ ] CHK011 Is a snapshot with a version newer than supported rejected with an explicit failure?
-- [ ] CHK012 Is a snapshot with a version older than supported handled according to the policy recorded in `data-model.md`?
+- [ ] CHK012 Is a snapshot with a version older than supported rejected with an explicit failure, consistent with the FR-010 decision?
 - [ ] CHK013 Is a snapshot with an absent or malformed version rejected with an explicit failure?
 - [ ] CHK014 Is the session state provably unchanged on every restore failure path, not merely on the ones that are easy to test?
 - [ ] CHK015 Does an unresolvable node reference produce a failure that names the offending node?
-- [ ] CHK016 Are FR-009 and FR-010 answered and recorded, rather than left as open questions at implementation time?
+- [x] CHK016 Are FR-009 and FR-010 answered and recorded, rather than left as open questions at implementation time? **Yes — decided 2026-09-16**, recorded in `data-model.md` and reflected in `spec.md` FR-009, FR-010, SC-006, and SC-007.
+- [ ] CHK035 Is the multi-dialogue line index validated against the resolved node's line range on restore, with the sentinel accepted?
+- [ ] CHK036 Is every node id referenced by a consumed choice record validated to still resolve on restore?
+- [ ] CHK037 Is every consumed option index validated against that node's option count on restore?
+- [ ] CHK038 Is the restore path structured as a per-version dispatch with a single supported branch, so a future migration is a new branch rather than a restructure?
 
 ## C++ and Blueprint boundary
 
