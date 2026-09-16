@@ -21,8 +21,25 @@ NarrRail 使用两条独立版本线：
 | Story Script schema version | 主仓库 | `1` | 来自 `.nrstory` 的 `meta.schemaVersion` |
 | GlobalConfig schema version | 主仓库 | `1` | 来自 GlobalConfig `.nrstory` 的 `meta.schemaVersion` |
 | Story Outline schema version | 主仓库 | `1` | 来自 `.nroutline` 的 `meta.schemaVersion`，当前 UE consumer 不导入 |
+| Session snapshot version | **本仓库（UE consumer）** | `1` | 运行时存档布局版本，见下 |
+| Global state snapshot version | **本仓库（UE consumer）** | `1` | 全局状态存档布局版本，见下 |
 
 插件版本升级不等于格式版本升级。格式字段、语义或 schema 变化必须先在主仓库通过 issue 和兼容说明确定，然后 UE consumer 再声明支持。
+
+### 1.1 存档快照版本
+
+存档快照版本是**本仓库自己的**版本线，与上表中主仓库拥有的 schema version 无关：
+
+- `Session snapshot version` 描述一次剧情会话的运行时存档布局（当前节点、行索引、变量、已消费选项、返回栈等）。
+- `Global state snapshot version` 描述全局状态的存档布局（已应用的全局配置、全局变量）。
+- 两者各自独立计数。一个变了不逼另一个跟着变。
+- 快照**不是**中立格式产物：它永远不会出现在 `.nrstory` / GlobalConfig / `.nroutline` 文件里。
+  因此它的版本变化不需要主仓库的格式 issue，也不需要动 `schemaVersion`。
+
+当前策略是**严格拒绝**：`SnapshotVersion` 只有等于受支持版本才接受，更旧、更新、缺失、畸形一律
+显式失败且不改动任何状态。向前迁移尚未实现；恢复路径已按「按版本分派」的结构写好，将来新增迁移
+是一个新分支而不是重构。完整决策与理由见
+[`specs/0001-save-load-snapshots/data-model.md`](../../specs/0001-save-load-snapshots/data-model.md)。
 
 ## 2. Compatibility matrix
 
@@ -47,6 +64,11 @@ NarrRail 使用两条独立版本线：
 | Choice modes | Partially supported | `SinglePass` and `ExhaustiveUntilComplete` are represented by runtime data |
 | Choice timer / `choice-timeout` | Not declared supported | Do not rely on UE runtime timeout routing until implemented and documented |
 | `.nroutline` project preview | Not supported | Authoring product feature only for now |
+| Save/load: session state | Supported | `GetSessionSnapshot` / `RestoreSessionSnapshot` on `UNarrRailStorySession`, session snapshot version `1`. Capture does not modify session state. |
+| Save/load: global state | Supported | `GetGlobalStateSnapshot` / `RestoreGlobalStateSnapshot` on `UNarrRailGlobalStateSubsystem`, global state snapshot version `1`. Global variables are deliberately not part of the session snapshot. |
+| Save/load: snapshot rejection | Supported | Version, identity, and consistency gates all run before any state is written. An unsupported version, a mismatched story, or an unresolvable node is rejected with an explicit failure and no state change. |
+| Save/load: forward migration | Not implemented | Only version `1` exists and no real save has been produced yet. The restore path is structured as a per-version dispatch so a migration is a new branch rather than a restructure. |
+| Save slot UI | Host sample only | `UNarrRailHostSaveGame` plus the save/load entry points on `ANarrRailPlayerController`. The plugin itself exposes no save UI. |
 | Unknown field preservation | Not guaranteed | Current importer maps supported fields into UE assets; unsupported fields may be dropped |
 
 ## 4. Setup from this package

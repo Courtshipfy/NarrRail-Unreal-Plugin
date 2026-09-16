@@ -55,11 +55,11 @@ Read it as a source of proven behaviour, not as a patch to apply wholesale.
 
 **Independent Test**: quickstart steps 2-4 driven from the host rather than from tests.
 
-- [ ] T015 [US2] Add `NarrRailUEHost/Source/NarrRailHost/NarrRailHostSaveGame.h` holding one serialized snapshot as a `USaveGame`.
-- [ ] T016 [US2] Add slot save and load entry points to `NarrRailUEHost/Source/NarrRailHost/NarrRailPlayerController.h` and `NarrRailUEHost/Source/NarrRailHost/NarrRailPlayerController.cpp`, covering the missing-slot failure path so the running session is left untouched (FR-005, FR-008).
-- [ ] T017 [US2] Verify the Blueprint-exposed surface for this feature matches FR-007 exactly: capture and restore on the session, save and load on the host. Remove any additional exposure found.
-- [ ] T018 [P] [US2] Migrate the save slot assets into `NarrRailUEHost/Content/NarrRailStage/UI/`: `Enum_SaveMode.uasset`, `WBP_Start.uasset`, `WBP_TextLine.uasset`, `SaveGame/WBP_SaveGame.uasset`, `SaveGame/WBP_SaveSlot.uasset`. Author or reconcile these in the editor; do not copy binary files blindly.
-- [ ] T019 [US2] Author or reconcile `NarrRailUEHost/Content/NarrRailStage/BP_StoryController.uasset` and `BP_StoryGameMode.uasset` so the save slot surface is reachable from the running stage. Record each reconciliation decision.
+- [x] T015 [US2] Add `NarrRailUEHost/Source/NarrRailHost/NarrRailHostSaveGame.h` holding one serialized snapshot as a `USaveGame`. **Done 2026-09-16.** Holds the session snapshot *and* the global state snapshot plus a display timestamp. One deviation from the reference: the two snapshot fields are `VisibleAnywhere` rather than `BlueprintReadWrite`, so a Blueprint cannot hand-assemble a slot payload — same FR-007 reasoning as the runtime struct.
+- [x] T016 [US2] Add slot save and load entry points to `NarrRailUEHost/Source/NarrRailHost/NarrRailPlayerController.h` and `NarrRailUEHost/Source/NarrRailHost/NarrRailPlayerController.cpp`, covering the missing-slot failure path so the running session is left untouched (FR-005, FR-008). **Done 2026-09-16.** `SaveNarrRailState` / `LoadNarrRailState`. A missing or foreign slot returns false before anything is touched; a failed restore logs the runtime's own message rather than swallowing it. **Known residual, documented in-source and below:** the host restores global state and session state as two steps, so if the global restore succeeds and the session restore is then rejected, global state stays at the saved values. Making that atomic needs a validate-only entry point on the runtime; see the note under Dependencies.
+- [x] T017 [US2] Verify the Blueprint-exposed surface for this feature matches FR-007 exactly: capture and restore on the session, save and load on the host. Remove any additional exposure found. **Done 2026-09-16 as a review, not a change pass.** The surface is: `GetSessionSnapshot` (`BlueprintPure`), `RestoreSessionSnapshot` (`BlueprintCallable`) on the session; `SaveNarrRailState` / `LoadNarrRailState` (`BlueprintCallable`) on the host; `SavedAtUtc` (`BlueprintReadOnly`) on the save game. No snapshot field is Blueprint-readable or writable at any layer. Everything the reference exposed beyond that was removed as part of T005 and T015 rather than left for this task.
+- [ ] T018 [P] [US2] **⚠️ Requires the editor.** Migrate the save slot assets into `NarrRailUEHost/Content/NarrRailStage/UI/`: `Enum_SaveMode.uasset`, `WBP_Start.uasset`, `WBP_TextLine.uasset`, `SaveGame/WBP_SaveGame.uasset`, `SaveGame/WBP_SaveSlot.uasset`. Author or reconcile these in the editor; do not copy binary files blindly.
+- [ ] T019 [US2] **⚠️ Requires the editor.** Author or reconcile `NarrRailUEHost/Content/NarrRailStage/BP_StoryController.uasset` and `BP_StoryGameMode.uasset` so the save slot surface is reachable from the running stage. Record each reconciliation decision. Depends on T018: both need the same editor session.
 
 ## Phase 5: User Story 3 - Reject incompatible saves (Priority: P2)
 
@@ -75,9 +75,9 @@ Read it as a source of proven behaviour, not as a patch to apply wholesale.
 
 ## Phase 6: Polish & Cross-Cutting Concerns
 
-- [ ] T024 [P] Update `README.md` compatibility table and `Docs/04_narrrail_ue_host/UNREAL_PLUGIN_COMPATIBILITY.md` to state the persistence capability and the snapshot version supported (SC-005).
-- [ ] T025 [P] Update the requirement row in `Docs/01_architecture/TECH_ARCHITECTURE.md` so 存档恢复 is no longer marked 规划中, and record the snapshot versioning policy there.
-- [ ] T026 [P] Reconcile the remaining conflicting dialogue assets in the editor and record the decisions: `NarrRail/Content/UI/ADV/WBP_Dialogue_ADV.uasset`, `NarrRail/Content/UI/NVL/WBP_Dialogue_NVL.uasset`, `NarrRail/Content/UI/NVL/WBP_ButtonLine.uasset`, `NarrRail/Content/UI/NVL/WBP_TextLine.uasset`.
+- [x] T024 [P] Update `README.md` compatibility table and `Docs/04_narrrail_ue_host/UNREAL_PLUGIN_COMPATIBILITY.md` to state the persistence capability and the snapshot version supported (SC-005). **Done 2026-09-16.** README gains a `Session snapshot` column (`version 1`). The compatibility doc gains two version rows, a new §1.1 explaining that the snapshot version is this repository's own version line and independent of the story `schemaVersion`, five capability rows (session save/load, global save/load, rejection, migration not implemented, save slot UI host-only), and the full snapshot-versioning policy.
+- [x] T025 [P] Update the requirement row in `Docs/01_architecture/TECH_ARCHITECTURE.md` so 存档恢复 is no longer marked 规划中, and record the snapshot versioning policy there. **Done 2026-09-16.** The row now reads 已完成 with the policy in the notes column, and the `Persistence` layer description no longer claims 版本迁移 without qualification — forward migration is explicitly not implemented and the dispatch seam is named as the place it would go.
+- [ ] T026 [P] Reconcile the remaining conflicting dialogue assets in the editor and record the decisions: `NarrRail/Content/UI/ADV/WBP_Dialogue_ADV.uasset`, `NarrRail/Content/UI/NVL/WBP_Dialogue_NVL.uasset`, `NarrRail/Content/UI/NVL/WBP_ButtonLine.uasset`, `NarrRail/Content/UI/NVL/WBP_TextLine.uasset`. **⚠️ Requires the editor** — no engine on the port machine, and these are binary assets that must not be copied or text-patched.
 - [ ] T027 Run the full automation suite and the host build; confirm both are clean. **⚠️ Not executable on the port machine** — no Unreal Engine is installed there (see `quickstart.md` §1). This task and T028 are the handoff: they must be run by the user on a machine with UE 5.7, and the result reported honestly rather than assumed.
 - [ ] T028 Run the unmatched quickstart steps in a real Unreal session and record which steps were performed, which were not, and each asset reconciliation decision, per the Reporting section of `quickstart.md`. **⚠️ Same blocker as T027.**
 - [ ] T029 Review the diff against `spec.md` and the constitution, confirming no neutral-format semantics were introduced and that the Blueprint surface is still minimal. Also resolve the dead `NarrRailHostTest.h` / `NarrRailHostTest.cpp` pair carried in from the host project template: an empty class, referenced by nothing, containing no automation test. Either delete it or give it a stated purpose — as it stands the name implies test coverage in the host module that does not exist.
@@ -93,6 +93,21 @@ Read it as a source of proven behaviour, not as a patch to apply wholesale.
 - T018-T019 are editor work and can proceed in parallel with T010-T014.
 - T024-T026 can proceed in parallel once Phase 2 lands.
 - T027-T029 run last.
+- T018, T019, T026, T027 and T028 all require a machine with Unreal Engine 5.7. None of them could be
+  performed on the machine this port was done on; see `quickstart.md` §1. They are the handoff.
+
+## Known residual: the host load is atomic per snapshot, not across the two
+
+FR-008's atomicity clause is about **session** state, and the session restore satisfies it: all three
+gates run before the first write, so a rejection leaves the session untouched. The host `LoadNarrRailState`
+however restores two snapshots in sequence (T016). If the global restore succeeds and the session restore
+is then rejected, global state stays at the saved values while the session does not move.
+
+Not fixed here, deliberately. Making it atomic requires the runtime to offer a validate-without-committing
+entry point so the host can two-phase both snapshots. That is an API change, and with no real save produced
+yet and no engine available to test against, it would be compensation logic that nothing exercises.
+**Trigger to revisit**: the first real need to recover from a partial host load. Recorded in-source at the
+ordering comment in `NarrRailPlayerController.cpp` so it is not rediscovered from scratch.
 
 ## MVP Scope
 
