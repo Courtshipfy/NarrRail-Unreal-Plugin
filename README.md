@@ -33,9 +33,13 @@ NarrRail-Unreal-Plugin/
 
 Current technical preview:
 
-| Plugin version | Unreal Engine | Story Script `.nrstory` | GlobalConfig `.nrstory` | `.nroutline` | Legacy `.nrrail` |
-| --- | --- | --- | --- | --- | --- |
-| `0.1.0-beta` | UE `5.7` | `schemaVersion: 1` | `schemaVersion: 1` | Not supported | Not supported |
+| Plugin version | Unreal Engine | Story Script `.nrstory` | GlobalConfig `.nrstory` | `.nroutline` | Legacy `.nrrail` | Session snapshot |
+| --- | --- | --- | --- | --- | --- | --- |
+| `0.1.0-beta` | UE `5.7` | `schemaVersion: 1` | `schemaVersion: 1` | Not supported | Not supported | `version 1` |
+
+The session snapshot version is a **runtime-owned save layout version**, separate from the story
+`schemaVersion` values. It is not part of the neutral format contract and never appears inside a
+`.nrstory`, GlobalConfig, or `.nroutline` file. See `Docs/04_narrrail_ue_host/UNREAL_PLUGIN_COMPATIBILITY.md`.
 
 See [Docs/04_narrrail_ue_host/UNREAL_PLUGIN_COMPATIBILITY.md](./Docs/04_narrrail_ue_host/UNREAL_PLUGIN_COMPATIBILITY.md) for the full matrix and setup guide.
 

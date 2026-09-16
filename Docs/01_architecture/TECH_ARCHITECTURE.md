@@ -69,7 +69,8 @@ Docs/
 - `Domain`：节点、边、变量、条件、动作、剧情资产定义
 - `Execution`：状态机（Start/Next/Choose/Stop/Pause/Resume）
 - `State`：会话上下文、历史轨迹、运行时缓存
-- `Persistence`：存档读写、版本迁移、异常恢复
+- `Persistence`：存档读写、版本门与异常恢复。向前迁移尚未实现——恢复路径已按「按版本分派」写好，
+  新增迁移是一个新分支而不是重构。
 - `Bridge`：Blueprint API 暴露与事件委托
 
 ### 3.2 Editor 分层（C++）
@@ -161,7 +162,7 @@ Docs/
 | Runtime 执行器 | C++ | 已完成 | NR-RUN-002-* | Start/Next/Choose/Pause/Resume/Stop |
 | 变量与条件 | C++ | 基本完成 | NR-RUN-003-* | 容器/作用域/通知/比较/逻辑运算，缓存优化待实现 |
 | Blueprint 接入层 | C++ | 已完成 | NR-RUN-005-* | 事件委托、蓝图函数库、完整 API 暴露 |
-| 存档恢复 | C++ | 规划中 | NR-RUN-006-* | |
+| 存档恢复 | C++ | 已完成 | NR-RUN-006-* | 会话快照 + 全局状态快照；版本/身份/一致性三道门；快照版本 `1`，迁移未实现 |
 | 脚本解析与校验 | C# | 已完成 | NR-IO-002-* | YAML 解析、语义校验、CLI 命令 |
 | 脚本导入导出 | C# | 规划中 | NR-IO-003/004-* | |
 | 编辑器图编辑 | C++ | 规划中 | NR-ED-002-* | UE 原生图编辑仍在规划 |
