@@ -67,13 +67,42 @@ Restore behaviour by version:
 | Snapshot version | Behaviour |
 |------------------|-----------|
 | Equal to the supported version | Restore proceeds. |
-| Less than the supported version | Reject with an explicit failure, and leave the session unchanged. Migration is deferred pending FR-010. |
+| Less than the supported version | Reject with an explicit failure, and leave the session unchanged. No migration path is implemented; see the FR-010 decision below. |
 | Greater than the supported version | Reject with an explicit failure, and leave the session unchanged. |
 | Absent or malformed | Reject with an explicit failure, and leave the session unchanged. |
 
-FR-010 leaves open whether forward migration should be implemented instead of rejection. Until that
-is answered, rejection is the required behaviour, because FR-003 and FR-008 forbid a partial or
-silent application.
+### FR-010 decision: strict rejection with a dispatch seam
+
+**Decided 2026-09-16.** The runtime accepts a snapshot only when `SnapshotVersion` equals the
+supported version. Every other value — older, newer, absent, or malformed — is rejected with an
+explicit failure and no state change.
+
+Forward migration is deliberately NOT implemented. At the time of the decision only version 1
+exists and no real save has been produced, so migration code would be written and tested against
+nothing. Shipped migration logic is also a common source of silent misreads, which is exactly what
+FR-003 and FR-008 exist to prevent.
+
+The obligation this decision places on the implementation is structural, not behavioural: the
+restore path MUST be a per-version dispatch with exactly one supported branch today. Adding a
+migration later is then a new branch, not a restructure of restore.
+
+**Trigger for revisiting**: the first time real saves must survive a snapshot layout change. At that
+point add one migration step (N to N+1) per version gap, with a test per step.
+
+### FR-009 decision: consistency gate over a content fingerprint
+
+**Decided 2026-09-16.** The story identity checks are kept, and a consistency gate is added over
+state that is bound to node content. See invariant 5 below for the exact checks.
+
+The alternative — recording a content fingerprint of the story asset and refusing whenever it
+changes — was rejected. Node identity is a stable `FName` id rather than a positional index, so
+editing dialogue text, adding nodes, reordering the graph, and re-exporting the story all leave
+existing saves valid. A fingerprint would refuse in all of those ordinary cases, forcing creators to
+replay, and it would require a new import-time mechanism to generate and store the fingerprint at
+all. It also would not distinguish an innocuous text edit from a genuinely breaking change.
+
+Leaving the behaviour as it is was also rejected: a node whose type or length changed, or a choice
+node that was deleted, currently restores an out-of-range or dangling state with no signal at all.
 
 ## Invariants
 
@@ -85,3 +114,16 @@ silent application.
    animation state (FR-011).
 4. A snapshot MUST NOT be applied when the node it references cannot be resolved in the loaded story
    asset; the failure MUST identify the offending node (edge case in spec.md).
+
+5. **Consistency gate (FR-009, decided 2026-09-16).** After the identity checks pass and before any
+   state is written, restore MUST verify that state bound to node content still matches the loaded
+   node:
+   - the multi-dialogue line index is within the resolved node's line range, or holds the sentinel;
+   - every node id referenced by a consumed choice record still resolves;
+   - every consumed option index is within that node's option count.
+
+   Any failure MUST reject the restore and leave the session unchanged, consistent with invariant 2.
+
+   *Rationale*: node identity is a stable `FName` id, so ordinary authoring — editing text, adding
+   nodes, reordering the graph — does not invalidate a save. Only a structural mismatch does, and
+   those three checks are where a structural mismatch actually surfaces.

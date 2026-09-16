@@ -67,7 +67,7 @@ A save written by a different snapshot layout must not be silently applied. Load
 - Save requested with no active session: MUST fail explicitly rather than write an empty snapshot.
 - Load requested while a typewriter animation is still revealing text: MUST settle the presenter into a defined state rather than resume mid-animation.
 - A restored node id no longer exists in the story asset (story was re-authored or re-exported): MUST be reported as a failure with the offending node identified, not treated as "start of story".
-- Story asset loaded at restore time differs from the asset the snapshot was taken against: MUST be detectable; the resolution policy is an open question (see FR-009).
+- Story asset loaded at restore time differs from the asset the snapshot was taken against: identity mismatch MUST be reported as a failure naming the mismatch. A same-asset content change is handled by the FR-009 consistency gate rather than by identity comparison.
 - Saving MUST NOT mutate the running session; a save followed immediately by continued play MUST behave identically to play without a save.
 
 ## Requirements *(mandatory)*
@@ -82,8 +82,13 @@ A save written by a different snapshot layout must not be silently applied. Load
 - **FR-006**: Saving MUST NOT alter the running session's observable state.
 - **FR-007**: The C++-to-Blueprint surface for this feature MUST stay minimal: snapshot capture and restore on the session, and slot save and load on the host.
 - **FR-008**: Restoring a snapshot MUST leave the session unchanged when it fails, so that a failed load cannot destroy in-progress play.
-- **FR-009**: [NEEDS CLARIFICATION: policy for a snapshot taken against a different story asset — reject always, or reject only when the referenced node is missing?]
-- **FR-010**: [NEEDS CLARIFICATION: forward-compatibility policy for older snapshot versions — reject outright, or migrate forward one version at a time?]
+- **FR-009**: The runtime MUST retain the story identity checks (story asset path, GlobalConfig path, story id) and MUST additionally run a consistency gate over state that is bound to node content, after the identity checks and before any state is written. The multi-dialogue line index MUST be within the resolved node's line range or the sentinel; every node id referenced by a consumed choice record MUST still resolve; and every consumed option index MUST be within that node's option count. Any failure MUST reject the restore and leave the session unchanged.
+
+  *Decided 2026-09-16.* A content fingerprint was rejected because node identity is a stable `FName` id, so editing dialogue text, adding nodes, and reordering the graph do not invalidate a save; a fingerprint would refuse far more often than necessary and would require a new import-time mechanism. Silence was rejected because a changed node type or a deleted choice node currently restores an out-of-range or dangling state without any signal.
+
+- **FR-010**: The runtime MUST accept a snapshot only when its version equals the supported version. Older, newer, absent, and malformed versions MUST all be rejected with an explicit failure, and the restore path MUST be structured as a per-version dispatch so that a future migration is added as a new branch rather than a restructure of restore.
+
+  *Decided 2026-09-16.* No migration is implemented while no real save exists. The reference behaviour of checking only a lower bound is rejected: it would let a future version-2 snapshot be read by a version-1 runtime and vice versa.
 - **FR-011**: Where behavior depends on the Unreal presenter or typewriter state, restore MUST define the presenter's resulting state rather than inheriting an animation-in-progress state.
 
 ### Key Entities *(include if feature involves data)*
@@ -101,6 +106,8 @@ A save written by a different snapshot layout must not be silently applied. Load
 - **SC-003**: An unsupported or malformed snapshot produces an explicit failure and zero session mutation, in 100% of rejection tests.
 - **SC-004**: The snapshot round trip is exercised by automated tests that run in the repository's existing test flow, with no manual step required.
 - **SC-005**: `README.md` compatibility claims and `Docs/04_narrrail_ue_host/UNREAL_PLUGIN_COMPATIBILITY.md` are updated to state the persistence capability and its snapshot version support.
+- **SC-006**: A snapshot whose multi-dialogue line index exceeds the resolved node's line count, whose consumed choice record references a node that no longer exists, or whose consumed option index exceeds the node's option count is rejected with zero session mutation, in 100% of consistency-gate tests (FR-009).
+- **SC-007**: A snapshot declaring a version other than the supported one is rejected with zero session mutation, in 100% of version-gate tests (FR-010).
 
 ## Assumptions
 
