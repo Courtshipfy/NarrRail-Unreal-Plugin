@@ -10,47 +10,128 @@ The complete resumable state of one running story session. Produced by the sessi
 session. Not a story-format artifact — it never appears inside a `.nrstory`, GlobalConfig, or
 `.nroutline` file.
 
-| Field | Type | Meaning | Confirmed |
-|-------|------|---------|-----------|
-| Snapshot version | `int32` | Layout version, used to gate restore. Reference implementation starts at `1`. | yes |
-| Current node | node reference | The node the session is sitting on at capture time. | to confirm exact member name |
-| Global variable state | `TMap<FName, FString>` | Global variables as seen by the session context. | yes (`VariableSnapshot` on the session context) |
-| Local variable state | `TMap<FName, FString>` | Session-local variables. | yes (`LocalVariableSnapshot`) |
-| Multi-dialogue line index | `int32`, sentinel `INDEX_NONE` | How far into a `MultiDialogue` node the session has advanced. | yes (`CurrentMultiDialogueLineIndex`) |
-| Last choice information | `FNarrRailLastChoiceInfo` | Which choice was taken last, needed by branch and presenter logic. | yes (`LastChoiceInfo`) |
-| Consumed choice selections | `TArray<FNarrRailChoiceSelectionSnapshot>` | Per-choice bookkeeping for nodes whose options are consumed as they are picked. | yes (`ExhaustiveChoiceSelections`) |
-| Presenter refresh intent | `bool` (call parameter, not stored) | Whether restore re-drives the presenter after restoring state. | yes (`RestoreSessionSnapshot(..., bool bRefreshPresenter)`) |
+Enumerated during T001 from `Courtshipfy/NarrRail@feature/narrrail-save-snapshots`
+(`NarrRail/Source/NarrRail/Public/Runtime/NarrRailStorySession.h`). **Fourteen stored fields.** The
+"Content-bound" column is what the FR-009 consistency gate has to defend; the "Purpose" column is
+the reason the field is kept at all, which T005 uses to decide Blueprint visibility.
 
-The reference implementation carries roughly twelve stored fields in total. The table records the
-fields verified during porting analysis; the remaining fields MUST be enumerated from the reference
-implementation at the start of implementation and either kept, with a stated reason, or dropped in
-favour of the minimal surface required by FR-007.
+| # | Field | Type | Purpose | Content-bound | Blueprint |
+|---|-------|------|---------|---------------|-----------|
+| 1 | `SnapshotVersion` | `int32`, default `1` | Layout version for the version gate. | no | should not be writable by callers |
+| 2 | `StoryId` | `FName` | Identity check against the loaded asset's `StoryId`. | no (identity) | no |
+| 3 | `StoryAssetPath` | `FSoftObjectPath` | Identity check against the loaded story asset. | no (identity) | no |
+| 4 | `GlobalConfigPath` | `FSoftObjectPath` | Identity check against the applied global config. | no (identity) | no |
+| 5 | `SessionState` | `ENarrRailSessionState` | Which lifecycle state the session was in. | no | no |
+| 6 | `StateBeforePause` | `ENarrRailSessionState` | The state to return to on `Resume()` after a restore mid-pause. | no | no |
+| 7 | `CurrentNodeId` | `FName` | The node the session is sitting on at capture time. Stable id, not a positional index. | **yes** — must resolve | no |
+| 8 | `NodeHistory` | `TArray<FName>` | Visited-node trail, used by history-dependent logic and the debugger. | node ids, **not yet validated** | no |
+| 9 | `EmittedEvents` | `TArray<FName>` | Events already raised, so a restore does not re-raise them. | no (event ids) | no |
+| 10 | `LocalVariableSnapshot` | `TMap<FName, FString>` | Session-local variables. Global variables are **not** here — see the separate entity below. | names bind to the story's local variable definitions | no |
+| 11 | `CurrentMultiDialogueLineIndex` | `int32`, sentinel `INDEX_NONE` | How far into a `MultiDialogue` node the session has advanced. | **yes** — line range | no |
+| 12 | `LastChoiceInfo` | `FNarrRailLastChoiceInfo` (5 sub-fields, below) | Which choice was taken last; read by branch and presenter logic. | **yes** — node id and index | no |
+| 13 | `ExhaustiveChoiceSelections` | `TArray<FNarrRailChoiceSelectionSnapshot>` | Canonical form of "which options are already consumed" for every `Choice` node that has been partially consumed. | **yes** — node ids and indices | no |
+| 14 | `ExhaustivePendingChoiceReturnStack` | `TArray<FName>` | Return stack for nested exhaustive-choice branches. | node ids, **not yet validated** | no |
+
+**FR-007 narrowing note (for T005).** The reference implementation marks every one of these fields
+`BlueprintReadWrite`. That is broader than FR-007 allows: a Blueprint authoring caller could set
+`SnapshotVersion`, or splice together a snapshot from field assignments, which is exactly what the
+version gate and the consistency gate exist to prevent. The port keeps `GetSessionSnapshot` as
+`BlueprintPure` and `RestoreSessionSnapshot` as `BlueprintCallable`, and drops Blueprint write access
+from the struct fields. A snapshot is only ever produced by capture and only ever consumed by
+restore.
+
+#### Struct field: `FNarrRailLastChoiceInfo`
+
+Declared in `NarrRailStoryTypes.h`, kept as a distinct struct because it is also part of the public
+runtime API (`GetLastChoice()`), not only of the snapshot.
+
+| Field | Type | Meaning |
+|-------|------|---------|
+| `ChoiceNodeId` | `FName` | The `Choice` node the selection happened on. |
+| `ChoiceIndex` | `int32`, `-1` when unset | The raw option index that was taken. |
+| `TargetNodeId` | `FName` | The node the selection led to. |
+| `ChoiceTextKey` | `FString` | Localisation key of the chosen option, kept for the presenter. |
+| `bValid` | `bool` | Whether any choice has been recorded yet. |
+
+#### Not stored — rebuilt at restore
+
+These are runtime caches in the reference implementation. They are deliberately absent from the
+snapshot; recording them would double the state and create a second source of truth that can
+disagree with the first. The port MUST rebuild rather than persist them.
+
+| Member | Type | Why it is not stored | Rebuilt how |
+|--------|------|----------------------|-------------|
+| `ExhaustiveSelectedChoiceIndices` | `TMap<FName, TSet<int32>>` | UHT does not support a container type as a `TMap` value, so it cannot carry a `UPROPERTY` and therefore cannot serialise. This is the mechanical reason #13 exists at all. | Rebuilt from `ExhaustiveChoiceSelections`, dropping `ChoiceNodeId == NAME_None` entries and negative indices. |
+| `RuntimeVisibleChoiceIndexMap` | `TMap<FName, TArray<int32>>` | Derived from the resolved node's options and the consumed set; storing it would let it go stale against a re-resolved node. | `Reset()`, then repopulated only when the restored current node is a `Choice`. |
+| `Context.VariableSnapshot` | `TMap<FName, FString>` | A merged view of global + local variables. | Recomputed by `SyncVariableSnapshotToContext()` after the local container is restored. |
+
+#### Call parameter, not stored
+
+`RestoreSessionSnapshot(..., bool bRefreshPresenter = true)` — whether restore re-drives the
+presenter after restoring state. Satisfies FR-011: the caller decides the presenter's resulting
+state rather than inheriting an in-progress animation.
+
+### Global state snapshot
+
+Global variables outlive a single session, so they are **not** part of the session snapshot. They
+live in `UNarrRailGlobalStateSubsystem` and serialise through their own value type, which carries its
+own independent `SnapshotVersion`.
+
+Enumerated during T001 from `NarrRail/Source/NarrRail/Public/Runtime/NarrRailGlobalStateSubsystem.h`.
+
+| # | Field | Type | Meaning | Content-bound |
+|---|-------|------|---------|---------------|
+| 1 | `SnapshotVersion` | `int32`, default `1` | Layout version for the global snapshot, independent of the session snapshot's version. | no |
+| 2 | `AppliedGlobalConfigPaths` | `TArray<FSoftObjectPath>` | Which global configs have been applied, so a restore does not re-apply them and clobber restored values. | **yes** — paths must resolve |
+| 3 | `GlobalVariableSnapshot` | `TMap<FName, FString>` | The global variables themselves. | names bind to the global config's variable definitions |
+
+**Correction to an earlier draft.** A prior version of this table claimed global variable state was
+carried by `VariableSnapshot` on the session context, and marked it "yes / confirmed". That is wrong
+on both counts: `Context.VariableSnapshot` is a derived cache (see above), and the actual persisted
+global state is `GlobalVariableSnapshot` on this separate struct. Recorded here so the error is not
+reintroduced.
+
+#### Global snapshot restore semantics
+
+`RestoreGlobalStateSnapshot` restores definitions and values, not just values: a global variable that
+the current global config declares but the snapshot does not mention still has to exist afterwards
+with a default value. This is why `AppliedGlobalConfigPaths` is part of the snapshot rather than
+being taken from the live subsystem.
 
 ### Choice selection record
 
-One entry per consumed `Choice` option, so a restored session still offers only the options the
-player has not yet taken.
+`FNarrRailChoiceSelectionSnapshot` — **one entry per `Choice` node** that has been partially
+consumed, not one entry per option. A single option-specific record would make a node with N taken
+options cost N entries and would lose the fact that they belong together.
 
-| Field | Meaning | Confirmed |
-|-------|---------|-----------|
-| Choice identity | Which node/option the record refers to. | to confirm exact member names |
-| Selection state | Whether the option has been consumed. | to confirm exact member names |
+| Field | Type | Meaning |
+|-------|------|---------|
+| `ChoiceNodeId` | `FName` | The `Choice` node this record is about. `NAME_None` entries are ignored on restore. |
+| `SelectedChoiceIndices` | `TArray<int32>` | Raw option indices already consumed on that node, **sorted ascending** by capture. Negative indices are ignored on restore. |
 
-The reference implementation declares `FNarrRailChoiceSelectionSnapshot` with two properties. Their
-exact names and types MUST be read from the reference implementation during T003.
+The sorted-array form is deliberate: it makes two captures of the same state compare equal, which is
+what the "capture does not mutate state" test (T013) relies on. The in-memory `TSet` has no defined
+iteration order, so serialising it directly would produce spuriously unequal snapshots.
 
 ### Save slot
 
-A named, user-indexed persistence target holding exactly one serialized session snapshot.
+A named, user-indexed persistence target holding exactly one serialized session snapshot **and** one
+serialized global state snapshot.
 
 | Field | Meaning |
 |-------|---------|
 | Slot name | Caller-provided name; reference host defaults to a demo slot name |
 | User index | Platform user index, so slots are per-user |
-| Payload | One serialized `Session snapshot` |
+| Payload | One `Session snapshot` plus one `Global state snapshot` |
 
-Backed by a `USaveGame` subclass in the host module (`NarrRailHostSaveGame`). The runtime module
-does not know about slots; it only produces and consumes snapshots.
+Backed by `UNarrRailHostSaveGame : USaveGame` in the host module. The runtime module does not know
+about slots; it only produces and consumes snapshots.
+
+| Field | Type | Meaning |
+|-------|------|---------|
+| `SessionSnapshot` | `FNarrRailStorySessionSnapshot` | The session snapshot. |
+| `GlobalStateSnapshot` | `FNarrRailGlobalStateSnapshot` | The global state snapshot. Co-located so one slot restores consistently. |
+| `SavedAtUtc` | `FString` | Display-only timestamp. **Not** read by any restore path — it must never gate a restore. |
 
 ## Versioning decision
 
@@ -115,15 +196,39 @@ node that was deleted, currently restores an out-of-range or dangling state with
 4. A snapshot MUST NOT be applied when the node it references cannot be resolved in the loaded story
    asset; the failure MUST identify the offending node (edge case in spec.md).
 
-5. **Consistency gate (FR-009, decided 2026-09-16).** After the identity checks pass and before any
-   state is written, restore MUST verify that state bound to node content still matches the loaded
-   node:
+5. **Consistency gate (FR-009, decided 2026-09-16; scope extended same day during T001).** After the
+   identity checks pass and before any state is written, restore MUST verify that state bound to node
+   content still matches the loaded node:
    - the multi-dialogue line index is within the resolved node's line range, or holds the sentinel;
    - every node id referenced by a consumed choice record still resolves;
-   - every consumed option index is within that node's option count.
+   - every consumed option index is within that node's option count;
+   - every node id on the exhaustive-choice return stack still resolves.
 
    Any failure MUST reject the restore and leave the session unchanged, consistent with invariant 2.
 
    *Rationale*: node identity is a stable `FName` id, so ordinary authoring — editing text, adding
    nodes, reordering the graph — does not invalidate a save. Only a structural mismatch does, and
-   those three checks are where a structural mismatch actually surfaces.
+   those checks are where a structural mismatch actually surfaces.
+
+6. **Gate scope: dereferenced node ids only, never merely recorded ones.** The return-stack check was
+   added during T001 after reading the reference implementation; `NodeHistory` was deliberately left
+   ungated. The rule that separates them:
+
+   - `CurrentNodeId`, the consumed choice records, and the return stack are **dereferenced** by the
+     runtime after a restore — they are passed to node lookup, so a dangling id produces a failure.
+   - `NodeHistory` is **recorded** and never resolved inside the runtime (`GetHistory()` hands the raw
+     list to the caller). History is also append-only, so a node deleted after it was visited stays in
+     history forever.
+
+   Gating on recorded ids would reject a save after an ordinary authoring edit — precisely the
+   behaviour the FR-009 rationale rejects — and would do so for no behavioural gain. Gating on
+   dereferenced ids catches the one case that matters.
+
+   *Evidence for the return-stack check.* The reference implementation pops the stack in
+   `TryPopExhaustiveReturn` and feeds the result straight to `AdvanceToNode`. If that node was
+   deleted, `AdvanceToNode` sets `SessionState = Error` and returns `MissingNode` — but only at the
+   moment the branch ends, which can be many interactions after the restore. The restore itself
+   reports success, so the failure surfaces far from its cause. `AdvanceToNode` bails out before
+   assigning `Context.CurrentNodeId`, so the state degrades to `Error` rather than being corrupted —
+   survivable, but the opposite of FR-008's "reject what it cannot restore". Rejecting at restore
+   moves the failure to where the cause is.
