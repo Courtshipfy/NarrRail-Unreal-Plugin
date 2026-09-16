@@ -133,8 +133,35 @@ about slots; it only produces and consumes snapshots.
 | `GlobalStateSnapshot` | `FNarrRailGlobalStateSnapshot` | The global state snapshot. Co-located so one slot restores consistently. |
 | `SavedAtUtc` | `FString` | Display-only timestamp. **Not** read by any restore path — it must never gate a restore. |
 
-## Versioning decision
+## Deliberate deviations from the reference implementation
 
+The reference is a source of proven behaviour, not a patch to apply wholesale (see `tasks.md`). Three
+places where the port intentionally does something the reference does not, each because the reference
+cannot satisfy a requirement this spec states:
+
+| # | Reference behaviour | Port behaviour | Requirement it serves |
+|---|---------------------|----------------|------------------------|
+| 1 | `SnapshotVersion` defaults to `1` and capture relies on that default. | Defaults to `0`; capture stamps the supported version explicitly. | FR-003 — "absent or malformed version is rejected". With a default of `1`, an older save that lacks the field deserialises to `1` and is silently accepted as current. A default of `0` makes absence a value the version gate necessarily rejects. |
+| 2 | Every snapshot field is `BlueprintReadWrite`; the version gate is a flat `<= 0` comparison. | Fields carry no Blueprint read/write access; the gate is a per-version dispatch accepting only the supported version. | FR-007 (minimal Blueprint surface — a caller could otherwise hand-assemble a snapshot or rewrite its version) and FR-010 (strict equality plus a per-version dispatch seam). |
+| 3 | Global restore resets `PresetSpeakersById` and then loads each config path in turn; a failed load returns after the reset. | Global restore resolves every config path first and mutates nothing until all have resolved. | FR-008, extended to global state: the realistic failure — a snapshot referencing a config that has been deleted — must not leave a half-applied global state. |
+
+On deviation 3, the residual is stated rather than hidden: after the resolve phase, the only remaining
+failure modes are content conflicts (a variable defined inconsistently, or a preset speaker whose data
+differs). Those are authoring errors rather than load-time conditions, and full transactionality would
+require rolling back variable *definitions*, not just values. Left as-is deliberately; the trigger to
+revisit is the first real need to recover from a content conflict.
+
+### Serialisation hardening
+
+Every persisted property carries the `SaveGame` specifier. The engine's own documentation for
+`SaveGameToSlot` says it writes all non-transient properties of the save object and that the `SaveGame`
+flag is not consulted, while community reports — and the `Ar.IsSaveGame()` behaviour of custom save
+archives — say the opposite. Adding the specifier costs nothing and is correct under both readings;
+omitting it is silently wrong under one of them, and the failure mode is a save that loads with every
+field at its default. Given that the port could not be run against an engine (see `quickstart.md` §1),
+the cheap-and-correct-under-both choice is the right one.
+
+## Versioning decision
 `SnapshotVersion` MUST be an independent counter, unrelated to the story `schemaVersion` declared in
 the neutral format contract.
 

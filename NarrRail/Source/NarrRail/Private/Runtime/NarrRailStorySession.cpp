@@ -8,6 +8,13 @@ TArray<UNarrRailStorySession*> UNarrRailStorySession::ActiveSessions;
 
 namespace NarrRailRuntime
 {
+// 当前受支持的会话快照版本。
+//
+// 恢复路径是一个「按版本分派」的开关，今天只有这一个分支。刻意不写成上限比较：把受支持版本
+// 收在这里、由开关去分派，未来要加一条向前迁移时就是新增一个 case，而不是把恢复的结构改掉
+// （FR-010）。也刻意不接受任何非 1 的值——更旧、更新、缺失（默认 0）、畸形（负数）一律拒绝。
+constexpr int32 SupportedSessionSnapshotVersion = 1;
+
 static bool TryParseBool(const FString& InValue, bool& OutValue)
 {
     if (InValue.Equals(TEXT("true"), ESearchCase::IgnoreCase) || InValue == TEXT("1"))
@@ -574,6 +581,384 @@ FString UNarrRailStorySession::ResolveSpeakerDisplayName(FName SpeakerId) const
     }
 
     return SpeakerId.ToString();
+}
+
+// ============================================================================
+// 存档快照：采集
+// ============================================================================
+
+FNarrRailStorySessionSnapshot UNarrRailStorySession::GetSessionSnapshot() const
+{
+    FNarrRailStorySessionSnapshot Snapshot;
+
+    // 显式盖章，而不是依赖字段默认值。字段默认值是 0，那是「缺失/畸形」的哨兵，采集要是产出
+    // 了它，自己采的快照就会被自己的版本门拒掉。
+    Snapshot.SnapshotVersion = NarrRailRuntime::SupportedSessionSnapshotVersion;
+
+    Snapshot.StoryId = StoryAsset != nullptr ? StoryAsset->StoryId : NAME_None;
+    Snapshot.StoryAssetPath = StoryAsset != nullptr ? FSoftObjectPath(StoryAsset) : FSoftObjectPath();
+    Snapshot.GlobalConfigPath = GlobalConfigAsset != nullptr ? FSoftObjectPath(GlobalConfigAsset) : FSoftObjectPath();
+    Snapshot.SessionState = SessionState;
+    Snapshot.StateBeforePause = StateBeforePause;
+    Snapshot.CurrentNodeId = Context.CurrentNodeId;
+    Snapshot.NodeHistory = Context.NodeHistory;
+    Snapshot.EmittedEvents = Context.EmittedEvents;
+    Snapshot.CurrentMultiDialogueLineIndex = CurrentMultiDialogueLineIndex;
+    Snapshot.LastChoiceInfo = LastChoiceInfo;
+    Snapshot.ExhaustivePendingChoiceReturnStack = ExhaustivePendingChoiceReturnStack;
+
+    if (VariableContainer != nullptr)
+    {
+        Snapshot.LocalVariableSnapshot = VariableContainer->GetSnapshot();
+    }
+
+    // ExhaustiveSelectedChoiceIndices 是 TSet，没有稳定的迭代顺序，直接落盘会让「同一状态」
+    // 的两次采集产出不相等的快照。这里转成每个节点一条的记录，并把索引排序，让快照可比较——
+    // 「采集不改变状态」的断言（FR-006 / SC-002）正是靠这一点成立的。
+    for (const TPair<FName, TSet<int32>>& Pair : ExhaustiveSelectedChoiceIndices)
+    {
+        FNarrRailChoiceSelectionSnapshot& ChoiceSnapshot = Snapshot.ExhaustiveChoiceSelections.AddDefaulted_GetRef();
+        ChoiceSnapshot.ChoiceNodeId = Pair.Key;
+        ChoiceSnapshot.SelectedChoiceIndices = Pair.Value.Array();
+        ChoiceSnapshot.SelectedChoiceIndices.Sort();
+    }
+
+    return Snapshot;
+}
+
+// ============================================================================
+// 存档快照：三道门
+//
+// 三个函数都只读不写，因此调用方可以把它们全部跑完再决定是否提交。
+// ============================================================================
+
+FNarrRailRuntimeResult UNarrRailStorySession::ValidateSnapshotVersion(const FNarrRailStorySessionSnapshot& Snapshot) const
+{
+    // 按版本分派，而不是上限比较。今天恰好只有一个受支持分支；要加一条向前迁移时，这里新增
+    // 一个 case 把旧布局升到当前布局，恢复路径本身的结构不变（FR-010）。
+    switch (Snapshot.SnapshotVersion)
+    {
+    case NarrRailRuntime::SupportedSessionSnapshotVersion:
+        return FNarrRailRuntimeResult::Make(ENarrRailRuntimeResultCode::Success, TEXT("Snapshot version is supported."));
+
+    default:
+        // 一个 default 覆盖四种情况：更旧、更新、缺失（反序列化后仍是默认的 0）、畸形（负数）。
+        // FR-010 对它们的要求一致——显式失败、不改状态——所以不需要再分情形。
+        return FNarrRailRuntimeResult::Make(
+            ENarrRailRuntimeResultCode::InvalidInput,
+            *FString::Printf(
+                TEXT("Unsupported NarrRail session snapshot version %d (supported: %d)."),
+                Snapshot.SnapshotVersion,
+                NarrRailRuntime::SupportedSessionSnapshotVersion));
+    }
+}
+
+FNarrRailRuntimeResult UNarrRailStorySession::ValidateSnapshotIdentity(const FNarrRailStorySessionSnapshot& Snapshot) const
+{
+    if (StoryAsset == nullptr)
+    {
+        return FNarrRailRuntimeResult::Make(ENarrRailRuntimeResultCode::InvalidState, TEXT("Session not initialized."));
+    }
+
+    if (!Snapshot.StoryAssetPath.IsNull() && FSoftObjectPath(StoryAsset) != Snapshot.StoryAssetPath)
+    {
+        return FNarrRailRuntimeResult::Make(
+            ENarrRailRuntimeResultCode::InvalidInput,
+            *FString::Printf(TEXT("Snapshot StoryAssetPath '%s' does not match current StoryAssetPath '%s'."),
+                *Snapshot.StoryAssetPath.ToString(),
+                *FSoftObjectPath(StoryAsset).ToString()));
+    }
+
+    if (!Snapshot.GlobalConfigPath.IsNull() && FSoftObjectPath(GlobalConfigAsset) != Snapshot.GlobalConfigPath)
+    {
+        return FNarrRailRuntimeResult::Make(
+            ENarrRailRuntimeResultCode::InvalidInput,
+            *FString::Printf(TEXT("Snapshot GlobalConfigPath '%s' does not match current GlobalConfigPath '%s'."),
+                *Snapshot.GlobalConfigPath.ToString(),
+                *FSoftObjectPath(GlobalConfigAsset).ToString()));
+    }
+
+    if (Snapshot.StoryId != NAME_None && StoryAsset->StoryId != NAME_None && Snapshot.StoryId != StoryAsset->StoryId)
+    {
+        return FNarrRailRuntimeResult::Make(
+            ENarrRailRuntimeResultCode::InvalidInput,
+            *FString::Printf(TEXT("Snapshot StoryId '%s' does not match current StoryId '%s'."),
+                *Snapshot.StoryId.ToString(),
+                *StoryAsset->StoryId.ToString()));
+    }
+
+    return FNarrRailRuntimeResult::Make(ENarrRailRuntimeResultCode::Success, TEXT("Snapshot identity checks passed."));
+}
+
+FNarrRailRuntimeResult UNarrRailStorySession::ValidateSnapshotConsistency(const FNarrRailStorySessionSnapshot& Snapshot) const
+{
+    // 只校验「恢复之后运行时真的会去解引用」的节点 Id。
+    //
+    // 只被记录、不被解引用的 Id 不在门内。NodeHistory 和 LastChoiceInfo 都只是原样交给调用方
+    // （GetHistory / GetLastChoice），运行时不解析它们；而且 NodeHistory 只增不减，作者删掉一个
+    // 曾访问过的节点之后它必然留下一个悬空 Id。对它们设门等于在普通编辑之后就拒绝存档，恰恰是
+    // FR-009 要避免的结果。规则与理由见 specs/0001-save-load-snapshots/data-model.md invariant 6。
+
+    // 检查 1：当前节点必须能解析。
+    const FNarrRailNode* CurrentNode = nullptr;
+    if (Snapshot.CurrentNodeId != NAME_None)
+    {
+        CurrentNode = FindNode(Snapshot.CurrentNodeId);
+        if (CurrentNode == nullptr)
+        {
+            return FNarrRailRuntimeResult::Make(
+                ENarrRailRuntimeResultCode::MissingNode,
+                *FString::Printf(TEXT("Snapshot current node '%s' does not exist in the loaded story asset."), *Snapshot.CurrentNodeId.ToString()),
+                Snapshot.CurrentNodeId);
+        }
+    }
+
+    // 检查 2：多行对话行索引要么是哨兵，要么落在当前节点的行数范围内。
+    if (Snapshot.CurrentMultiDialogueLineIndex != INDEX_NONE)
+    {
+        if (CurrentNode == nullptr || CurrentNode->NodeType != ENarrRailNodeType::MultiDialogue)
+        {
+            return FNarrRailRuntimeResult::Make(
+                ENarrRailRuntimeResultCode::InvalidInput,
+                *FString::Printf(
+                    TEXT("Snapshot CurrentMultiDialogueLineIndex is %d, but node '%s' is not a MultiDialogue node."),
+                    Snapshot.CurrentMultiDialogueLineIndex,
+                    *Snapshot.CurrentNodeId.ToString()),
+                Snapshot.CurrentNodeId);
+        }
+
+        const int32 TotalLines = CurrentNode->MultiDialogue.Lines.Num();
+        if (Snapshot.CurrentMultiDialogueLineIndex < 0 || Snapshot.CurrentMultiDialogueLineIndex >= TotalLines)
+        {
+            return FNarrRailRuntimeResult::Make(
+                ENarrRailRuntimeResultCode::InvalidInput,
+                *FString::Printf(
+                    TEXT("Snapshot CurrentMultiDialogueLineIndex %d is outside node '%s' line range [0, %d)."),
+                    Snapshot.CurrentMultiDialogueLineIndex,
+                    *Snapshot.CurrentNodeId.ToString(),
+                    TotalLines),
+                Snapshot.CurrentNodeId);
+        }
+    }
+
+    // 检查 3：被消费的选项记录所指向的节点必须仍能解析，且每个已消费的选项索引必须落在该节点
+    // 的选项数范围内。
+    for (const FNarrRailChoiceSelectionSnapshot& ChoiceSnapshot : Snapshot.ExhaustiveChoiceSelections)
+    {
+        if (ChoiceSnapshot.ChoiceNodeId == NAME_None)
+        {
+            // 与提交阶段保持一致：空记录被忽略，不当作失败。
+            continue;
+        }
+
+        const FNarrRailNode* ChoiceNode = FindNode(ChoiceSnapshot.ChoiceNodeId);
+        if (ChoiceNode == nullptr)
+        {
+            return FNarrRailRuntimeResult::Make(
+                ENarrRailRuntimeResultCode::InvalidInput,
+                *FString::Printf(
+                    TEXT("Snapshot ExhaustiveChoiceSelections references node '%s', which does not exist in the loaded story asset."),
+                    *ChoiceSnapshot.ChoiceNodeId.ToString()),
+                ChoiceSnapshot.ChoiceNodeId);
+        }
+
+        if (ChoiceNode->NodeType != ENarrRailNodeType::Choice)
+        {
+            return FNarrRailRuntimeResult::Make(
+                ENarrRailRuntimeResultCode::InvalidInput,
+                *FString::Printf(
+                    TEXT("Snapshot ExhaustiveChoiceSelections references node '%s', which is no longer a Choice node."),
+                    *ChoiceSnapshot.ChoiceNodeId.ToString()),
+                ChoiceSnapshot.ChoiceNodeId);
+        }
+
+        const int32 OptionCount = ChoiceNode->Choices.Num();
+        for (const int32 ChoiceIndex : ChoiceSnapshot.SelectedChoiceIndices)
+        {
+            if (ChoiceIndex < 0 || ChoiceIndex >= OptionCount)
+            {
+                return FNarrRailRuntimeResult::Make(
+                    ENarrRailRuntimeResultCode::InvalidInput,
+                    *FString::Printf(
+                        TEXT("Snapshot consumed choice index %d on node '%s' is outside the node's option range [0, %d)."),
+                        ChoiceIndex,
+                        *ChoiceSnapshot.ChoiceNodeId.ToString(),
+                        OptionCount),
+                    ChoiceSnapshot.ChoiceNodeId);
+            }
+        }
+    }
+
+    // 检查 4：穷举选择返回栈上的节点 Id 必须仍能解析。
+    //
+    // 这一条是 T001 枚举参考实现时补上的。返回栈会被 TryPopExhaustiveReturn 弹出并直接交给
+    // AdvanceToNode，所以栈里一个已被删除的节点不会在恢复时暴露，而是等到该分支结束的那一刻
+    // 才以 MissingNode 失败——那时上下文已经远离成因，恢复本身却报告了成功。在这里拦下来，
+    // 失败就落在成因旁边。
+    for (const FName ReturnNodeId : Snapshot.ExhaustivePendingChoiceReturnStack)
+    {
+        if (ReturnNodeId == NAME_None)
+        {
+            continue;
+        }
+
+        if (FindNode(ReturnNodeId) == nullptr)
+        {
+            return FNarrRailRuntimeResult::Make(
+                ENarrRailRuntimeResultCode::MissingNode,
+                *FString::Printf(
+                    TEXT("Snapshot ExhaustivePendingChoiceReturnStack references node '%s', which does not exist in the loaded story asset."),
+                    *ReturnNodeId.ToString()),
+                ReturnNodeId);
+        }
+    }
+
+    return FNarrRailRuntimeResult::Make(ENarrRailRuntimeResultCode::Success, TEXT("Snapshot consistency checks passed."));
+}
+
+// ============================================================================
+// 存档快照：恢复
+// ============================================================================
+
+FNarrRailRuntimeResult UNarrRailStorySession::RestoreSessionSnapshot(const FNarrRailStorySessionSnapshot& Snapshot, const bool bRefreshPresenter)
+{
+    // 三道门全部跑完并且都通过，才允许第一次写入。任何一次提前返回都留下一个逐字段未被触碰的
+    // 会话（FR-008）。
+    //
+    // 顺序是刻意的，不是随手排的：版本门最便宜、也最可能在「存档来自别处」时先失败；身份校验
+    // 负责在版本正确但对象不对时给出比一致性门更准确的报错；一致性门最后跑，因为它要做节点解析，
+    // 是三者中最贵的一个。
+    const FNarrRailRuntimeResult VersionResult = ValidateSnapshotVersion(Snapshot);
+    if (VersionResult.Code != ENarrRailRuntimeResultCode::Success)
+    {
+        return VersionResult;
+    }
+
+    const FNarrRailRuntimeResult IdentityResult = ValidateSnapshotIdentity(Snapshot);
+    if (IdentityResult.Code != ENarrRailRuntimeResultCode::Success)
+    {
+        return IdentityResult;
+    }
+
+    const FNarrRailRuntimeResult ConsistencyResult = ValidateSnapshotConsistency(Snapshot);
+    if (ConsistencyResult.Code != ENarrRailRuntimeResultCode::Success)
+    {
+        return ConsistencyResult;
+    }
+
+    // === 提交：以下不再有失败路径 ===
+
+    SessionState = Snapshot.SessionState;
+    StateBeforePause = Snapshot.StateBeforePause;
+    Context.CurrentNodeId = Snapshot.CurrentNodeId;
+    Context.NodeHistory = Snapshot.NodeHistory;
+    Context.EmittedEvents = Snapshot.EmittedEvents;
+    CurrentMultiDialogueLineIndex = Snapshot.CurrentMultiDialogueLineIndex;
+    LastChoiceInfo = Snapshot.LastChoiceInfo;
+    ExhaustivePendingChoiceReturnStack = Snapshot.ExhaustivePendingChoiceReturnStack;
+    RuntimeVisibleChoiceIndexMap.Reset();
+
+    // 重建内存中的 TSet 缓存。它本身不落盘，只以上面 ExhaustiveChoiceSelections 的形式存在。
+    ExhaustiveSelectedChoiceIndices.Reset();
+    for (const FNarrRailChoiceSelectionSnapshot& ChoiceSnapshot : Snapshot.ExhaustiveChoiceSelections)
+    {
+        if (ChoiceSnapshot.ChoiceNodeId == NAME_None)
+        {
+            continue;
+        }
+
+        TSet<int32>& Selected = ExhaustiveSelectedChoiceIndices.FindOrAdd(ChoiceSnapshot.ChoiceNodeId);
+        for (const int32 ChoiceIndex : ChoiceSnapshot.SelectedChoiceIndices)
+        {
+            if (ChoiceIndex >= 0)
+            {
+                Selected.Add(ChoiceIndex);
+            }
+        }
+    }
+
+    if (VariableContainer != nullptr)
+    {
+        VariableContainer->RestoreFromSnapshot(Snapshot.LocalVariableSnapshot);
+    }
+    SyncVariableSnapshotToContext();
+
+    const FNarrRailNode* CurrentNode = FindNode(Context.CurrentNodeId);
+    if (CurrentNode != nullptr && CurrentNode->NodeType == ENarrRailNodeType::Choice)
+    {
+        RuntimeVisibleChoiceIndexMap.Add(Context.CurrentNodeId, BuildVisibleChoiceIndices(*CurrentNode));
+    }
+
+    if (bRefreshPresenter)
+    {
+        RefreshCurrentNodeAfterRestore();
+    }
+
+    return FNarrRailRuntimeResult::Make(ENarrRailRuntimeResultCode::Success, TEXT("NarrRail session snapshot restored."), Context.CurrentNodeId);
+}
+
+void UNarrRailStorySession::RefreshCurrentNodeAfterRestore()
+{
+    const FNarrRailNode* Node = FindNode(Context.CurrentNodeId);
+    if (Node == nullptr)
+    {
+        return;
+    }
+
+    UObject* PresenterObject = DialoguePresenter.GetObject();
+    const bool bPresenterValid =
+        PresenterObject != nullptr &&
+        PresenterObject->GetClass()->ImplementsInterface(UNarrRailDialoguePresenterInterface::StaticClass());
+
+    FNarrRailNode NodeForEvent = *Node;
+
+    if (bPresenterValid)
+    {
+        if (Node->NodeType == ENarrRailNodeType::Dialogue)
+        {
+            FNarrRailDialogueRequest Request;
+            Request.NodeId = Node->NodeId;
+            Request.SpeakerId = Node->Dialogue.SpeakerId;
+            Request.TextContent = Node->Dialogue.TextKey;
+            Request.SpeechRate = Node->Dialogue.SpeechRate;
+            Request.VoiceAsset = Node->Dialogue.VoiceAsset;
+            Request.bAutoAdvance = false;
+            INarrRailDialoguePresenterInterface::Execute_ShowDialogue(PresenterObject, Request);
+        }
+        else if (Node->NodeType == ENarrRailNodeType::MultiDialogue)
+        {
+            FNarrRailDialogueRequest Request;
+            if (BuildMultiDialogueDisplay(*Node, Request))
+            {
+                INarrRailDialoguePresenterInterface::Execute_ShowDialogue(PresenterObject, Request);
+
+                NodeForEvent.NodeType = ENarrRailNodeType::Dialogue;
+                NodeForEvent.Dialogue.SpeakerId = Request.SpeakerId;
+                NodeForEvent.Dialogue.TextKey = Request.TextContent;
+                NodeForEvent.Dialogue.SpeechRate = Request.SpeechRate;
+            }
+        }
+        else if (Node->NodeType == ENarrRailNodeType::Choice)
+        {
+            FNarrRailChoiceRequest Request;
+            Request.NodeId = Node->NodeId;
+            Request.Choices = BuildVisibleChoiceOptions(*Node);
+            Request.Session = this;
+            INarrRailDialoguePresenterInterface::Execute_ShowChoices(PresenterObject, Request);
+        }
+    }
+
+    OnNodeEntered.Broadcast(Context.CurrentNodeId, NodeForEvent);
+
+    if (Node->NodeType == ENarrRailNodeType::Choice)
+    {
+        OnChoicesReady.Broadcast(Context.CurrentNodeId, BuildVisibleChoiceOptions(*Node));
+    }
+
+    if (SessionState == ENarrRailSessionState::Completed)
+    {
+        OnSessionEnded.Broadcast(Context.CurrentNodeId, SessionState);
+    }
 }
 
 void UNarrRailStorySession::RegisterDialoguePresenter(TScriptInterface<INarrRailDialoguePresenterInterface> Presenter)
