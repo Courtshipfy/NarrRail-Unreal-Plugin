@@ -159,6 +159,31 @@ be attributed from a diff. For each one, open both versions in the editor and de
 None of these may be resolved by copying a file over the other. Record the decision for each in the
 pull request description.
 
+### ⚠️ Five further assets exist ONLY on the reference branch
+
+These do not exist in this repository in any form — not as a conflict, not as an older copy. They are
+the save slot UI, and **the reference branch is their only copy**:
+
+| Asset | Size |
+|-------|------|
+| `NarrRailUEHost/Content/NarrRailStage/UI/Enum_SaveMode.uasset` | 2,203 B |
+| `NarrRailUEHost/Content/NarrRailStage/UI/WBP_Start.uasset` | 337,906 B |
+| `NarrRailUEHost/Content/NarrRailStage/UI/WBP_TextLine.uasset` | 56,251 B |
+| `NarrRailUEHost/Content/NarrRailStage/UI/SaveGame/WBP_SaveGame.uasset` | 104,456 B |
+| `NarrRailUEHost/Content/NarrRailStage/UI/SaveGame/WBP_SaveSlot.uasset` | 130,664 B |
+
+Consequences, and they are the reason this is called out separately:
+
+1. **`Courtshipfy/NarrRail@feature/narrrail-save-snapshots` MUST NOT be deleted until T018 and T019 are
+   done.** Deleting it destroys the only copy of ~631 KB of UI work. This is not a stylistic
+   preference; it is data loss.
+2. These are binary assets. They must be **authored or reconciled in the editor**, never copied across
+   repositories and never text-patched — the same rule as the six assets above, and for the same
+   reason: a difference between two same-named `.uasset` files cannot be attributed from a diff.
+
+Reference commit for recovery: `2e3903f8a42711f54e9aa279135239387beab799`. Recorded here as well as in
+`tasks.md`, so that recovering these assets does not depend on the branch still existing under that name.
+
 ## Reporting
 
 When closing the issue, state:
