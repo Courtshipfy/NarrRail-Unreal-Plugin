@@ -44,6 +44,12 @@ A developer or player using the sample host can save the current session into a 
 3. **Given** no slot exists for the requested name, **When** load is called, **Then** the call fails explicitly and the current session is left untouched.
 4. **Given** the save slot UI is open, **When** the player selects a saved slot, **Then** loading resumes the story in that slot.
 
+> **Implementation status (2026-09-16).** Scenarios 1-3 are implemented and covered by automated tests.
+> **Scenario 4 is not satisfied:** the save slot UI was never migrated, because migrating it needs the
+> Unreal editor and no engine is installed on the machine this port was done on. The UI assets are
+> preserved in `Docs/05_reference_archive/` and the work is tracked as T018/T019. This note exists so the
+> gap reads as an open criterion rather than as an oversight — the criterion itself is unchanged.
+
 ---
 
 ### User Story 3 - Reject incompatible saves instead of resuming corrupt state (Priority: P2)

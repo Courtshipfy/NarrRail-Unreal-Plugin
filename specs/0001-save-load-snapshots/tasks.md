@@ -33,6 +33,13 @@ unfinished work; they are blocked by the absence of a toolchain:
 | T027 | Engine. Run the automation suite and the host build. |
 | T028 | Editor. Run quickstart steps 2-6 in a live session. |
 
+Because T018 and T019 are open, **User Story 2 acceptance scenario 4** — selecting a saved slot from the
+save slot UI resumes the story — is not satisfied. That is an explicitly open criterion, not a hidden one.
+
+The reference branch this feature was ported from was deleted on 2026-09-16. Its payload is archived two
+ways before deletion; T018 onward should read `Docs/05_reference_archive/README.md` first. See the second
+"Known residual" section at the end of this file.
+
 Also note the scope of what was done: T029 (the constitution review) **is** complete, but it is a source
 review and could not check a build or a test run.
 
@@ -81,7 +88,7 @@ file. See `quickstart.md` §1 before reporting the feature as working.
 - [x] T015 [US2] Add `NarrRailUEHost/Source/NarrRailHost/NarrRailHostSaveGame.h` holding one serialized snapshot as a `USaveGame`. **Done 2026-09-16.** Holds the session snapshot *and* the global state snapshot plus a display timestamp. One deviation from the reference: the two snapshot fields are `VisibleAnywhere` rather than `BlueprintReadWrite`, so a Blueprint cannot hand-assemble a slot payload — same FR-007 reasoning as the runtime struct.
 - [x] T016 [US2] Add slot save and load entry points to `NarrRailUEHost/Source/NarrRailHost/NarrRailPlayerController.h` and `NarrRailUEHost/Source/NarrRailHost/NarrRailPlayerController.cpp`, covering the missing-slot failure path so the running session is left untouched (FR-005, FR-008). **Done 2026-09-16.** `SaveNarrRailState` / `LoadNarrRailState`. A missing or foreign slot returns false before anything is touched; a failed restore logs the runtime's own message rather than swallowing it. **Known residual, documented in-source and below:** the host restores global state and session state as two steps, so if the global restore succeeds and the session restore is then rejected, global state stays at the saved values. Making that atomic needs a validate-only entry point on the runtime; see the note under Dependencies.
 - [x] T017 [US2] Verify the Blueprint-exposed surface for this feature matches FR-007 exactly: capture and restore on the session, save and load on the host. Remove any additional exposure found. **Done 2026-09-16 — and it found something.** The review's first pass claimed the surface was already minimal; it was not. `GetGlobalStateSnapshot` and `RestoreGlobalStateSnapshot` had been carried over as `UFUNCTION`s, and FR-007 enumerates only session capture/restore plus host save/load. Both were demoted to plain public C++ methods — still callable by the host and the tests, no longer visible to Blueprint. Public is not the same as Blueprint-visible in UE, and the reference implementation conflated the two. Final surface: `GetSessionSnapshot` (`BlueprintPure`), `RestoreSessionSnapshot` (`BlueprintCallable`), `SaveNarrRailState` / `LoadNarrRailState` (`BlueprintCallable`), plus `SavedAtUtc` as a documented read-only display exception (CHK043). No snapshot field is Blueprint-readable or writable at any layer.
-- [ ] T018 [P] [US2] **⚠️ Requires the editor, and the reference branch is the ONLY copy of these five files.** Migrate the save slot assets into `NarrRailUEHost/Content/NarrRailStage/UI/`: `Enum_SaveMode.uasset` (2,203 B), `WBP_Start.uasset` (337,906 B), `WBP_TextLine.uasset` (56,251 B), `SaveGame/WBP_SaveGame.uasset` (104,456 B), `SaveGame/WBP_SaveSlot.uasset` (130,664 B) — ~631 KB with no copy in this repository. Author or reconcile these in the editor; do not copy binary files blindly. **This task and T019 are the branch-deletion gate**; see "Known residual" below.
+- [ ] T018 [P] [US2] **⚠️ Requires the editor.** Migrate the save slot assets into `NarrRailUEHost/Content/NarrRailStage/UI/`: `Enum_SaveMode.uasset` (2,203 B), `WBP_Start.uasset` (337,906 B), `WBP_TextLine.uasset` (56,251 B), `SaveGame/WBP_SaveGame.uasset` (104,456 B), `SaveGame/WBP_SaveSlot.uasset` (130,664 B) — ~631 KB. Author or reconcile these in the editor; do not copy binary files blindly. **Source:** the reference branch was deleted 2026-09-16; these five now come from `Docs/05_reference_archive/reference-branch-payload.zip` (or the `archive/narrrail-save-snapshots` tag in the main repository). Read that directory's `README.md` first — it also lists 4 unmigrated Unreal remote-tooling scripts that may be the fastest route to reproducing this work. **This task and T019 close User Story 2 acceptance scenario 4.**
 - [ ] T019 [US2] **⚠️ Requires the editor.** Author or reconcile `NarrRailUEHost/Content/NarrRailStage/BP_StoryController.uasset` and `BP_StoryGameMode.uasset` so the save slot surface is reachable from the running stage. Record each reconciliation decision. Depends on T018: both need the same editor session.
 
 ## Phase 5: User Story 3 - Reject incompatible saves (Priority: P2)
@@ -132,37 +139,49 @@ yet and no engine available to test against, it would be compensation logic that
 **Trigger to revisit**: the first real need to recover from a partial host load. Recorded in-source at the
 ordering comment in `NarrRailPlayerController.cpp` so it is not rediscovered from scratch.
 
-## Known residual: `feature/narrrail-save-snapshots` is not yet deletable
+## Known residual: the branch was deleted with work still open
 
-The goal of this port was to reach a state where the reference branch could be deleted. **It has not been
-reached, and deletion right now would destroy work.** The gate is T018 plus T019, and the reason is asset
-inventory, not code.
+`Courtshipfy/NarrRail@feature/narrrail-save-snapshots` **was deleted on 2026-09-16**, after archiving. The
+port's goal was to reach a state where it could go; it was reached by moving the payload out rather than by
+finishing the work, and that distinction matters.
 
-The audit below compares full recursive `ls-tree` blob hashes of
-`Courtshipfy/NarrRail@feature/narrrail-save-snapshots` (`2e3903f`) against this repository's `main`. It is
-reproducible; `quickstart.md` §7 records the method and two traps in it.
+**Archiving removed the data-loss reason. It did not close the work.** Two independent copies were made
+first:
 
-| Category | Count | Effect on deletion |
-|----------|-------|--------------------|
-| UI asset present only on the branch | 5 (~631 KB) | **Blocking.** No copy exists here. T018. |
-| Asset present in both, content differs | 6 | **Blocking.** The branch side holds the slot wiring. T019, T026. |
-| Test story asset under an old name | 2 | Not blocking. Rename-twins of copies here (identical byte size). |
-| Dead host scaffolding (`NarrRailHostTest.*`) | 2 | Not blocking. Empty class, deleted here in T029. |
-| Runtime/host source | 9 files differing, 0 missing | Not blocking. Ported deliberately, with three recorded deviations. |
+- Tag `archive/narrrail-save-snapshots` in `Courtshipfy/NarrRail` — annotated `84b90f3` →
+  `2e3903f8a42711f54e9aa279135239387beab799`. Complete: the whole tree, reference C++ included.
+- `NarrRailUEHost/../Docs/05_reference_archive/reference-branch-payload.zip` in this repository — 27 files,
+  1.7 MB, with a per-file SHA-256 manifest and a `README.md` covering recovery. See that README for the
+  full contents list.
 
-Two facts worth stating plainly, because both were nearly missed:
+What was at risk, precisely. Scope is **paths the branch changed since its merge base `70fcdb0`** — not a
+two-tree comparison, which over-reported this by 4× (see `quickstart.md` §7 for why):
 
-1. The five UI assets — `Enum_SaveMode.uasset` (2,203 B), `WBP_Start.uasset` (337,906 B),
-   `WBP_TextLine.uasset` (56,251 B), `SaveGame/WBP_SaveGame.uasset` (104,456 B),
-   `SaveGame/WBP_SaveSlot.uasset` (130,664 B) — are the save slot surface. Without T018 the ported C++ has
-   no way to be exercised from the running stage, so T028 could not be performed either.
-2. **The two "extra" story assets and the `NarrRailHostTest` pair are not gaps.** They surface in a naive
-   path-set difference and were cleared only after checking blob hashes and byte sizes. Do not re-open them
-   as risks without re-running that check.
+| Category | Count | Disposition |
+|----------|-------|-------------|
+| UI asset absent from this repository | 5 (~631 KB) | Archived. **T018 still open.** |
+| Asset in both, branch version differs | 6 | Archived (branch side). **T019/T026 still open.** |
+| Unreal remote-tooling scripts, unmigrated | 4 | Archived. Not previously noticed; see below. |
+| Reference C++ (deviations' evidence base) | 5 | Archived. |
+| Story assets renamed by the branch | 2 + 1 deletion | Archived / recorded. Not a risk. |
+| Dead host scaffolding (`NarrRailHostTest.*`) | 2 | Not archived. Empty class, deleted here in T029. |
+| `NarrRailEditor/**`, `Docs/06_planning/TASK_PLAN.md` | ~85 | **Not branch payload at all** — `main`'s own later changes. Excluded. |
 
-Deletion is therefore gated on **T018 and T019 landing in this repository**, not on anything in the source
-repository. Once the five assets exist here in reconciled form, the branch's unique payload is empty except
-for reference history.
+Three things worth stating plainly:
+
+1. **The 4 Unreal remote-tooling scripts were a genuine find.** `NarrRailUEHost/Content/Python/init_unreal.py`,
+   `NarrRailUEHost/Content/Python/narrrail_remote_server.py`, `Tools/dump_widgets.py`, `Tools/unreal_remote.py`
+   — written on the branch, never migrated, present in no other tree. They drive the editor over Unreal's
+   remote Python interface, which is likely how the branch's widget work was done at all. Whoever does T018
+   should look at them first; they may be the fastest route to reproducing that work.
+2. **The five UI assets are the save slot surface.** Without T018 the ported C++ has no way to be exercised
+   from the running stage, so T028 could not be performed either.
+3. **User Story 2 acceptance scenario 4 is not satisfied** and is now an explicitly open acceptance
+   criterion, not a hidden one: "Given the save slot UI is open, When the player selects a saved slot, Then
+   loading resumes the story in that slot." T018 and T019 are what close it.
+
+**T018, T019, T026, T027 and T028 remain open and all require a machine with Unreal Engine 5.7.** Status is
+therefore still 27/32, and nothing in this feature has been compiled.
 
 ## MVP Scope
 
