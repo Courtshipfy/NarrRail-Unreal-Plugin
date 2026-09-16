@@ -184,6 +184,32 @@ Consequences, and they are the reason this is called out separately:
 Reference commit for recovery: `2e3903f8a42711f54e9aa279135239387beab799`. Recorded here as well as in
 `tasks.md`, so that recovering these assets does not depend on the branch still existing under that name.
 
+### Audited and cleared — looks branch-only, is not
+
+The check above ("present on the branch, absent here") was originally done as a path-set difference, which
+over-reports: a file can be absent under one name and present under another, or absent and worthless. Each
+remaining hit was then audited individually. These are **not** deletion risks:
+
+- `.../NarrRailEditor_TestRepo/Stories/伤物语.uasset` (15,823 B) and `.../抚物语.uasset` (27,970 B). This
+  repository holds `傷物語.uasset` (15,823 B) and `撫物語.uasset` (27,970 B) — **identical byte sizes**,
+  different blob hashes. A UE asset embeds its own asset name, so the rename alone changes the hash. These
+  are rename-twins of this repository's copies, already migrated; the third one, `蜗物语.uasset`
+  (18,727 B), is byte-identical across both and needed no audit. Nothing is lost by dropping the
+  branch's two.
+- `NarrRailUEHost/Source/NarrRailHost/NarrRailHostTest.h` (228 B) and `.cpp` (196 B). An empty class with a
+  default constructor and destructor, added by `5c030cc 示例项目初步重构`, never modified since, and
+  referenced by no other file in either repository. Dead scaffolding; its absence here is correct, not a gap.
+
+Method, so the audit can be re-run rather than re-argued: compare full recursive `ls-tree` blob hashes of
+`feature/narrrail-save-snapshots` against this repository's `main`, not path sets and not `git diff` against
+the source repository's `main` — that `main` no longer carries any Unreal content, so everything under
+`NarrRail/` and `NarrRailUEHost/` reads as "added" there and the diff is uninformative. Note also that
+non-ASCII paths arrive octal-escaped from Git; a trailing quote left on the decoded path makes
+`cat-file -s` fail silently and report every such file as 0 B.
+
+On that hash comparison this repository carries **no** asset that the branch lacks, so the inventory gap is
+one-directional: the five files in the table above, plus the six conflicts listed before it.
+
 ## Reporting
 
 When closing the issue, state:
